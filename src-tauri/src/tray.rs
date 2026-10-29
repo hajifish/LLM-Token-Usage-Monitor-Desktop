@@ -83,6 +83,8 @@ fn tray_segment(p: &ProviderStatus) -> String {
 
 /// 该服务商是否需要在状态栏展示：按 name + 回退后的 alias 匹配配置项，
 /// 匹配不到时默认展示（与 serde default 的「新字段默认开」语义一致）。
+/// 两侧 alias 均 trim 后比较：scheduler 的 display_alias 仅过滤纯空白、原样保留其余空白，
+/// 配置 alias 带前后空白时若只 trim 一侧会失配，导致逐服务商开关静默失效。
 fn provider_show_in_tray(config: &AppConfig, p: &ProviderStatus) -> bool {
     config
         .providers
@@ -94,7 +96,7 @@ fn provider_show_in_tray(config: &AppConfig, p: &ProviderStatus) -> bool {
                     .map(str::trim)
                     .filter(|a| !a.is_empty())
                     .unwrap_or(&c.name)
-                    == p.alias.as_str()
+                    == p.alias.trim()
         })
         .map(|c| c.show_in_tray)
         .unwrap_or(true)
@@ -409,5 +411,45 @@ mod tray_title_tests {
             build_tray_title(&config(vec![]), &s).unwrap(),
             "Claude… 70%"
         );
+    }
+
+    #[test]
+    fn eight_char_alias_not_truncated() {
+        // "Kimi API" 恰 8 字符（K,i,m,i,空格,A,P,I）→ 不截断
+        let s = UsageSummary {
+            providers: vec![status("Kimi API", Some(balance(70.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "Kimi API 70%"
+        );
+    }
+
+    #[test]
+    fn cjk_multibyte_long_alias_truncated_by_char_count() {
+        // "智谱清言助手测试版" 共 9 个汉字 > 8 → 按字符数截前 7 字 + …
+        let s = UsageSummary {
+            providers: vec![status("智谱清言助手测试版", Some(balance(70.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "智谱清言助手测… 70%"
+        );
+    }
+
+    #[test]
+    fn alias_with_surrounding_whitespace_still_respects_show_in_tray() {
+        // 配置 alias 带前后空白：scheduler 原样保留为 display_alias（未 trim），
+        // provider_show_in_tray 必须对两侧都 trim 才能匹配，否则开关静默失效
+        let cfg = config(vec![pconfig("DeepSeek", Some(" 工作号 "), false)]);
+        let mut work = status(" 工作号 ", Some(balance(88.0, "CNY")), None);
+        work.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![work],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&cfg, &s), None);
     }
 }

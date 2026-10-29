@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
@@ -6,10 +7,38 @@ import UpdateNotice from './components/UpdateNotice';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
+import type { AppConfig } from './types';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
   const { summary, loading, error, refresh } = useUsage();
+  const [trayTextEnabled, setTrayTextEnabled] = useState(true);
+
+  /** 拉取托盘文字开关；从设置页切回时也刷新，避免设置页保存后状态过期 */
+  const fetchTrayEnabled = useCallback(async () => {
+    try {
+      const cfg = await invoke<AppConfig>('get_config');
+      setTrayTextEnabled(cfg.tray_text_enabled);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTrayEnabled();
+  }, [fetchTrayEnabled, view]);
+
+  /** 球开关即时保存：save_config 唤醒调度器重建托盘，菜单栏立即生效 */
+  const toggleTrayText = useCallback(async () => {
+    try {
+      const cfg = await invoke<AppConfig>('get_config');
+      const next = { ...cfg, tray_text_enabled: !cfg.tray_text_enabled };
+      await invoke('save_config', { newConfig: next });
+      setTrayTextEnabled(next.tray_text_enabled);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<string>('navigate', (event) => {
@@ -29,7 +58,7 @@ function App() {
       <div className="app">
         {view === 'usage' ? (
           <div className="usage-view">
-            <div className="app-header">
+            <div className="app-header" data-tauri-drag-region>
               <h1 className="app-title">
                 <span className="app-title-logo-wrap">
                   <img src="/tray-logo.png" alt="" className="app-title-logo" />
@@ -37,6 +66,11 @@ function App() {
                 用量
               </h1>
               <div className="header-actions">
+                <label className="ball-toggle" title="菜单栏显示开关">
+                  <input type="checkbox" checked={trayTextEnabled} onChange={toggleTrayText} />
+                  <span className="ball-dot" aria-hidden="true" />
+                  <span className="ball-label">状态栏</span>
+                </label>
                 {summary?.last_updated && (
                   <span className="header-time">{summary.last_updated}</span>
                 )}

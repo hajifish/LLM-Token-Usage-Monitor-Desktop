@@ -873,6 +873,36 @@ input:focus, select:focus {
   border: 1px solid var(--system-separator);
 }
 
+/* ===== 状态栏显示设置 ===== */
+.tray-display-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  border: 1px solid var(--system-separator);
+}
+
+.tray-provider-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.tray-provider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--system-secondary-label);
+  cursor: pointer;
+}
+
+.tray-provider-row input {
+  width: auto;
+}
+
 .update-row {
   display: flex;
   align-items: center;

@@ -221,7 +221,7 @@ function Settings({ onBack }: SettingsProps) {
 
   return (
     <div className="settings">
-      <div className="settings-header">
+      <div className="settings-header" data-tauri-drag-region>
         <button className="back-btn" onClick={onBack}>
           ← 返回
         </button>
@@ -304,6 +304,45 @@ function Settings({ onBack }: SettingsProps) {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* 状态栏显示 */}
+        <div className="settings-section">
+          <h3>状态栏显示</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">在菜单栏图标旁显示指标文字</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.tray_text_enabled}
+                  onChange={(e) =>
+                    setConfig({ ...config, tray_text_enabled: e.target.checked })
+                  }
+                />
+              </label>
+            </div>
+            {config.tray_text_enabled && (
+              <div className="tray-provider-list">
+                {config.providers
+                  .map((p, i) => ({ p, i }))
+                  .filter(({ p }) => p.enabled)
+                  .map(({ p, i }) => (
+                    <label key={`${p.name}-${p.alias || i}`} className="tray-provider-row">
+                      <input
+                        type="checkbox"
+                        checked={p.show_in_tray}
+                        onChange={(e) => updateProvider(i, 'show_in_tray', e.target.checked)}
+                      />
+                      <span>{p.alias?.trim() || providerLabel(p.name)}</span>
+                    </label>
+                  ))}
+              </div>
+            )}
+            <span className="update-hint">
+              关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。修改需点击右上角「保存」生效。
+            </span>
           </div>
         </div>
 

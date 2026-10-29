@@ -124,6 +124,11 @@
   border-color: #fff;
 }
 
+/* 键盘 Tab 聚焦时给出可见焦点环（input 被 opacity:0 隐藏，焦点落在圆点上） */
+.ball-toggle input:focus-visible + .ball-dot {
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
 .ball-label {
   font-size: 11px;
   color: var(--system-secondary-label);
@@ -434,7 +439,7 @@
   padding: 7px 16px;
   border: 1px solid var(--system-separator);
   border-radius: 6px;
-  background: var(--system-secondary-bg);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--system-blue);
   cursor: pointer;
   font-size: 13px;

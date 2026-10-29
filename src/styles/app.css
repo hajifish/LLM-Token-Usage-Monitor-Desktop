@@ -3,7 +3,6 @@
   --system-bg: #1e1e1e;
   --system-secondary-bg: #2d2d2d;
   --system-tertiary-bg: #3a3a3a;
-  --system-card-bg: #2a2a2a;
   --system-separator: rgba(255, 255, 255, 0.1);
   
   --system-label: #ffffff;
@@ -15,9 +14,7 @@
   --system-green: #30d158;
   --system-orange: #ff9f0a;
   --system-red: #ff453a;
-  --system-purple: #bf5af2;
-  --system-pink: #ff375f;
-  
+
   --system-accent: var(--system-blue);
   
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
@@ -207,34 +204,6 @@
   animation: spin 0.8s linear infinite;
 }
 
-/* Total balance card */
-.total-card {
-  text-align: center;
-  padding: 20px 16px;
-  margin-bottom: 16px;
-  background: var(--system-card-bg);
-  border-radius: 12px;
-  border: 1px solid var(--system-separator);
-}
-
-.total-label {
-  display: block;
-  font-size: 11px;
-  color: var(--system-secondary-label);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin-bottom: 6px;
-}
-
-.total-value {
-  display: block;
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--system-green);
-  letter-spacing: -0.5px;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Card grid - auto wrap layout */
 .card-grid {
   display: grid;
@@ -336,12 +305,6 @@
   box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
 
-.p-card-value {
-  font-size: 17px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Big main number */
 .p-card-main {
   text-align: center;
@@ -439,38 +402,6 @@
   font-size: 12px;
   color: var(--system-red);
   margin-top: 4px;
-}
-
-/* Footer */
-.panel-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding-top: 16px;
-  margin-top: 16px;
-  border-top: 1px solid var(--system-separator);
-}
-
-.footer-time {
-  font-size: 12px;
-  color: var(--system-tertiary-label);
-}
-
-.footer-btn {
-  border: none;
-  background: rgba(10, 132, 255, 0.12);
-  color: var(--system-blue);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 12px;
-  border-radius: 6px;
-  transition: all 0.15s;
-}
-
-.footer-btn:hover {
-  background: rgba(10, 132, 255, 0.2);
 }
 
 /* Empty / loading */
@@ -735,7 +666,7 @@ input:focus, select:focus {
   cursor: pointer;
   font-size: 11px;
 }
-.cancel-btn:hover { background: var(--system-quaternary-fill); }
+.cancel-btn:hover { background: rgba(255, 255, 255, 0.1); }
 
 .ds-hint {
   display: block;

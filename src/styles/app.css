@@ -709,6 +709,188 @@ input:focus, select:focus {
   background: rgba(10, 132, 255, 0.05);
 }
 
+/* ===== In-app update ===== */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(10, 132, 255, 0.12);
+  border-bottom: 1px solid var(--system-separator);
+  flex-shrink: 0;
+}
+
+.update-banner-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.update-banner-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--system-blue);
+}
+
+.update-banner-notes {
+  font-size: 12px;
+  color: var(--system-secondary-label);
+  line-height: 1.5;
+}
+
+.update-banner-error,
+.update-error {
+  font-size: 12px;
+  color: var(--system-red);
+}
+
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.update-btn {
+  border: 1px solid var(--system-separator);
+  background: transparent;
+  color: var(--system-secondary-label);
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.update-btn:hover {
+  border-color: var(--system-blue);
+  color: var(--system-blue);
+}
+.update-btn.primary {
+  border-color: var(--system-blue);
+  background: var(--system-blue);
+  color: #fff;
+}
+.update-btn.primary:hover {
+  background: #0070e0;
+}
+.update-btn.ghost {
+  border-color: transparent;
+  color: var(--system-tertiary-label);
+}
+.update-btn.ghost:hover {
+  border-color: var(--system-separator);
+  color: var(--system-secondary-label);
+}
+
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.update-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--system-tertiary-bg);
+  overflow: hidden;
+}
+
+.update-progress-fill {
+  height: 100%;
+  background: var(--system-blue);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+.update-progress-fill.indeterminate {
+  width: 40%;
+  animation: update-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes update-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+.update-progress-text {
+  font-size: 11px;
+  color: var(--system-tertiary-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Settings: 关于与更新卡片 */
+.update-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--system-card-bg);
+  border-radius: 10px;
+  border: 1px solid var(--system-separator);
+}
+
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.update-row-label {
+  font-size: 13px;
+  color: var(--system-secondary-label);
+}
+
+.update-row-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--system-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-date {
+  color: var(--system-tertiary-label);
+}
+
+.update-available {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(10, 132, 255, 0.08);
+}
+
+.update-notes {
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--system-secondary-label);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.update-hint {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--system-tertiary-label);
+}
+
+.update-status-line {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 540px) {
   .app {

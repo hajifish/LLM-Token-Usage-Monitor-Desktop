@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
+import UpdateNotice from './components/UpdateNotice';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
@@ -76,6 +77,7 @@ function App() {
                 </button>
               </div>
             </div>
+            <UpdateNotice />
             <UsagePanel summary={summary} loading={loading} error={error} refresh={refresh} />
           </div>
         ) : (

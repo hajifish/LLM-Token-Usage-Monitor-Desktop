@@ -20,6 +20,7 @@ A lightweight desktop application for monitoring token usage and balances across
 - **System Tray Integration** — Runs quietly in the background with a native tray icon
 - **Auto-Start** — Optionally launch on system startup
 - **Periodic Polling** — Automatically refreshes usage data on a configurable schedule
+- **In-App Auto-Update** — Checks for new versions automatically and installs them in place, then restarts
 - **Low Resource Footprint** — Powered by Tauri's lightweight Rust backend
 
 ## Download
@@ -29,9 +30,12 @@ Head to [GitHub Releases](https://github.com/hajifish/Local-LLM-Token-Usage-Moni
 | Platform | Chip | Format |
 |----------|------|--------|
 | macOS | Apple Silicon (M1/M2/M3/M4) | `.dmg` |
-| Windows | x64 | `.msi` |
+| Windows | x64 | `.exe` (NSIS installer, recommended) |
+| Windows | x64 | `.msi` (optional, manual upgrades only — no in-app auto-update) |
 
 > Intel-based Macs are not supported. If you need an Intel version, please build from source.
+
+> Windows users should prefer the `.exe` (NSIS) installer: it installs per-user, requires no administrator rights, and is the format used by in-app auto-update. If you previously installed the `.msi` build, we recommend uninstalling it and reinstalling via `.exe` to gain auto-update (uninstalling keeps the configuration under `%APPDATA%`, so your keys are preserved).
 
 ### macOS "App is Damaged" Warning on First Launch
 
@@ -42,6 +46,19 @@ xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.a
 ```
 
 > If the app is not in `/Applications`, replace it with the actual path.
+
+## In-App Auto-Update
+
+Starting with v0.2, the app includes built-in auto-update:
+
+- **When it checks** — once 60 seconds after launch, then every 24 hours. You can also trigger it from the tray menu ("Check for Updates") or from the Settings page.
+- **What it checks** — the latest published release on GitHub Releases (draft releases are not visible publicly, so publishing the draft acts as the distribution gate). You are not bothered when you are already up to date.
+- **Download and install** — when a new version is found, you can download, install, and restart entirely in-app; no manual installer download required.
+- **Signature verification** — update packages are signed with minisign and verified against the public key embedded in the app. A package that fails verification is discarded.
+- **Skip a version** — you can skip a specific version so it no longer prompts; undo it later under Settings → About & Updates.
+- **Turn off auto-check** — auto-check can be disabled under Settings → About & Updates; manual checks remain available.
+- **macOS permission prompt** — replacing the app in `/Applications` requires administrator rights, so macOS may ask for your password during installation. This is expected.
+- **Getting the capability for the first time** — versions before v0.2 have no update module, so you need to install v0.2 or later manually once. After that, updates happen in-app.
 
 ## Configuration & Key Security
 
@@ -134,6 +151,14 @@ npm run tauri build
 
 Built artifacts will be located in `src-tauri/target/release/bundle/`.
 
+> **Note:** the project enables `bundle.createUpdaterArtifacts`, and generating update packages requires a minisign private key — so a plain local `npm run tauri build` fails without one. For local build validation, temporarily disable update-package generation:
+>
+> ```bash
+> npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+> ```
+>
+> To reproduce a full release build, set `TAURI_SIGNING_PRIVATE_KEY` (the key contents, or a path to the key file) and its password `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The private key is sensitive — never commit it.
+
 ### Contributing
 
 Issues and Pull Requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
@@ -145,8 +170,10 @@ Issues and Pull Requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 │   ├── components/
 │   │   ├── ErrorBoundary.tsx   # Error boundary component
 │   │   ├── Settings.tsx        # Provider configuration page
+│   │   ├── UpdateNotice.tsx    # In-app update notice and progress
 │   │   └── UsagePanel.tsx      # Usage display panel
 │   ├── hooks/
+│   │   ├── useUpdate.ts        # Update state hook
 │   │   └── useUsage.ts         # Data fetching hook
 │   ├── styles/
 │   │   └── app.css             # Global styles (light theme)
@@ -158,12 +185,16 @@ Issues and Pull Requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 │   │   │   ├── kimi.rs         # Kimi (Moonshot)
 │   │   │   ├── zhipu.rs        # Zhipu (GLM)
 │   │   │   ├── openai.rs       # OpenAI
-│   │   │   └── anthropic.rs    # Anthropic
+│   │   │   ├── anthropic.rs    # Anthropic
+│   │   │   ├── codex.rs        # Codex (ChatGPT, CLI credentials)
+│   │   │   ├── claude_code.rs  # Claude Code (CLI credentials)
+│   │   │   └── kimi_code.rs    # Kimi Code (CLI credentials)
 │   │   ├── commands.rs         # Tauri command handlers
 │   │   ├── config.rs           # Configuration management
 │   │   ├── models.rs           # Data models
 │   │   ├── scheduler.rs        # Background polling scheduler
-│   │   └── tray.rs             # System tray
+│   │   ├── tray.rs             # System tray
+│   │   └── updater.rs          # In-app auto-update
 │   └── Cargo.toml
 └── .github/workflows/          # CI/CD
     ├── build.yml               # Build verification

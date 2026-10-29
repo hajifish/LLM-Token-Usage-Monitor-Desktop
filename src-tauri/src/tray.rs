@@ -114,10 +114,20 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     // 初始菜单：紧凑风格，scheduler 会动态替换为带供应商详情的完整菜单
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
+    let update_item = MenuItem::with_id(app, "check-update", "检查更新", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "⚙ 设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&open_item, &separator1, &settings_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &open_item,
+            &separator1,
+            &update_item,
+            &settings_item,
+            &quit_item,
+        ],
+    )?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
     let icon_path = app
@@ -164,6 +174,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "quit" => app.exit(0),
+            "check-update" => crate::updater::on_tray_click(app),
             "settings" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();

@@ -12,18 +12,18 @@ permissions:
 jobs:
   release:
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - os: macos-latest
-            bundle-path: src-tauri/target/release/bundle/dmg/*.dmg
-          - os: windows-latest
-            bundle-path: src-tauri/target/release/bundle/msi/*.msi
+        os: [macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          # 版本号派生需要完整的 tag 历史（git tag -l 计数）
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -45,57 +45,48 @@ jobs:
       - name: Set version from tag
         shell: bash
         run: |
-          # Extract sequence number from auto-tag for patch version
-          # v2026.9.7.7 → 0.1.7, v0.1.0 → 0.1.0
-          RAW=${GITHUB_REF_NAME#v}
-          IFS='.' read -ra PARTS <<< "$RAW"
-          if [ ${#PARTS[@]} -eq 3 ] && [ ${PARTS[0]} -le 255 ] 2>/dev/null; then
-            NEW_VERSION="$RAW"
-          elif [ ${#PARTS[@]} -ge 4 ]; then
-            NEW_VERSION="0.1.${PARTS[3]}"
-          else
-            NEW_VERSION="0.1.0"
-          fi
-          echo "Setting version to $NEW_VERSION (from tag $RAW)"
+          # 版本号必须全局单调递增（应用内更新的 semver 比较只升不降），
+          # 因此不使用日期 tag 直接派生，而是用仓库 v* tag 总数作为 patch：
+          # 0.2.<tag 总数>；超过 255（Windows MSI 每段上限）自动进位 minor。
+          COUNT=$(git tag -l 'v*' | wc -l | tr -d ' ')
+          MINOR=$((2 + COUNT / 256))
+          PATCH=$((COUNT % 256))
+          NEW_VERSION="0.${MINOR}.${PATCH}"
+          echo "Setting version to $NEW_VERSION ($COUNT existing v* tags)"
           npm version "$NEW_VERSION" --no-git-tag-version || echo "Version already $NEW_VERSION"
           sed -i.bak "s/^version = .*/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
           node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));c.version='$NEW_VERSION';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(c,null,2)+'\n')"
 
-      - name: Build Tauri app
+      # 构建并直接维护 draft Release：上传各平台安装包、更新签名与 latest.json 静态清单。
+      # 只有手动发布（取消 draft）后，releases/latest/download/latest.json 才对外可见，
+      # 因此「发布草稿」这一步天然是更新分发闸门。
+      - name: Build and upload release assets
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts for release
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: release-${{ matrix.os }}
-          path: |
-            ${{ matrix.bundle-path }}
-          if-no-files-found: warn
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          # 生成 latest.json（含各平台 URL 与 minisign 签名）
+          includeUpdaterJson: true
+          # 自动更新走 NSIS（per-user 安装，无需 UAC）；MSI 仅作为手动下载选项
+          updaterJsonPreferNsis: true
 
-  create-release:
+  release-notes:
     needs: release
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.1
-        with:
-          path: artifacts
-          pattern: release-*
-
-      - name: List artifacts
-        run: ls -R artifacts/
-
-      - name: Create GitHub Release
+      - name: Fill generated release notes
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.3.0
         with:
+          tag_name: ${{ github.ref_name }}
           draft: true
           prerelease: false
           generate_release_notes: true
-          files: |
-            artifacts/**/*.dmg
-            artifacts/**/*.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

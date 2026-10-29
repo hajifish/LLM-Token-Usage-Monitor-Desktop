@@ -16,7 +16,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# macos-private-api：tauri.conf.json 的 macOSPrivateApi=true（窗口 transparent + hudWindow 毛玻璃）必需；
+# tauri CLI 会按配置自动注入，直接 cargo check/test/build（CI、IDE）时需在此显式声明
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-autostart = "2"
 # 应用内自动更新：检查 GitHub Releases 静态清单 latest.json，minisign 签名校验后原地安装
 tauri-plugin-updater = "2"

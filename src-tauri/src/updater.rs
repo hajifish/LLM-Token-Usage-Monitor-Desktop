@@ -122,7 +122,10 @@ fn emit_status(app: &AppHandle) {
     let _ = app.emit("update-status", &snapshot(app));
 }
 
-/// 变更状态：闭包内只允许改字段；释放锁后再广播事件并重建托盘菜单。
+/// 变更状态：闭包内只允许改字段；释放锁后再广播事件并原地刷新托盘条目文案。
+///
+/// 注意这里绝不能整体重建托盘菜单：检查通常由用户点击托盘条目发起，
+/// 重建与紧接着的菜单交互并发会触发 AppKit panic（panic=abort 即闪退）。
 fn mutate_status(app: &AppHandle, f: impl FnOnce(&mut UpdateStatus)) {
     if let Some(state) = app.try_state::<UpdateState>() {
         {
@@ -131,7 +134,7 @@ fn mutate_status(app: &AppHandle, f: impl FnOnce(&mut UpdateStatus)) {
         }
     }
     emit_status(app);
-    crate::scheduler::refresh_tray_menu(app);
+    crate::tray::refresh_update_item(app);
 }
 
 fn fail(app: &AppHandle, message: String) -> UpdateStatus {

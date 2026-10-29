@@ -1,10 +1,45 @@
 use crate::models::{ProviderStatus, UsageSummary};
+use std::sync::Mutex;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, Wry,
 };
+
+/// 托盘中「检查更新」条目的当前句柄。
+///
+/// 数据轮询会全量重建菜单并创建新条目，因此句柄随每次重建登记更新；
+/// 更新状态变化时只对当前句柄原地 `set_text`（主线程顺序派发），
+/// 绝不因状态变化整体替换菜单对象 —— `set_menu` 与用户的菜单交互并发时，
+/// AppKit 在菜单动作分发中会 panic（`panic = "abort"` 下表现为 SIGABRT 闪退）。
+pub struct TrayUpdateItem(Mutex<MenuItem<Wry>>);
+
+/// 创建「检查更新」条目并登记句柄。菜单重建与初始创建统一走这里，
+/// 保证托管句柄始终指向当前已挂载到托盘上的那个条目。
+pub fn create_update_item(app: &AppHandle, label: &str) -> tauri::Result<MenuItem<Wry>> {
+    let item = MenuItem::with_id(app, "check-update", label, true, None::<&str>)?;
+    match app.try_state::<TrayUpdateItem>() {
+        Some(slot) => {
+            *slot.0.lock().unwrap_or_else(|e| e.into_inner()) = item.clone();
+        }
+        None => {
+            app.manage(TrayUpdateItem(Mutex::new(item.clone())));
+        }
+    }
+    Ok(item)
+}
+
+/// 原地刷新「检查更新」条目文案（更新状态变化时调用）。
+pub fn refresh_update_item(app: &AppHandle) {
+    let label = crate::updater::tray_item_label(app);
+    if let Some(state) = app.try_state::<TrayUpdateItem>() {
+        let item = state.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Err(e) = item.set_text(label) {
+            log::warn!("Tray: 更新条目文案刷新失败: {}", e);
+        }
+    }
+}
 
 fn tray_icon_path(app: &AppHandle) -> std::path::PathBuf {
     let resource = app
@@ -114,7 +149,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     // 初始菜单：紧凑风格，scheduler 会动态替换为带供应商详情的完整菜单
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
-    let update_item = MenuItem::with_id(app, "check-update", "检查更新", true, None::<&str>)?;
+    let update_item = create_update_item(app, "检查更新")?;
     let settings_item = MenuItem::with_id(app, "settings", "⚙ 设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 

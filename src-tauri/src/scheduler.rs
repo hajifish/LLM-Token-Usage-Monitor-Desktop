@@ -3,7 +3,7 @@ use crate::providers;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter,
 };
 use tokio::sync::{Notify, RwLock};
 use tokio::time::Duration;
@@ -338,15 +338,11 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         };
         critical_ok &= menu.append(&open_item).is_ok();
 
-        // 5.5) 更新入口：发现新版本时文案变为版本号，点击直达主窗口的更新横幅
+        // 5.5) 更新入口：发现新版本时文案变为版本号，点击直达主窗口的更新横幅。
+        // 条目经 create_update_item 创建并登记句柄，之后状态变化走原地改文案，
+        // 不再触发菜单整体重建（重建与用户菜单交互并发会触发 AppKit panic）。
         let update_label = crate::updater::tray_item_label(app_handle);
-        if let Ok(update_item) = MenuItem::with_id(
-            app_handle,
-            "check-update",
-            &update_label,
-            true,
-            None::<&str>,
-        ) {
+        if let Ok(update_item) = crate::tray::create_update_item(app_handle, &update_label) {
             critical_ok &= menu.append(&update_item).is_ok();
         }
 
@@ -376,17 +372,6 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         }
     }
     let _ = app_handle;
-}
-
-/// 立即用最近一次汇总重建托盘菜单（更新状态变化时调用，不必等待下一次数据轮询）。
-pub fn refresh_tray_menu(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Some(summary) = app.try_state::<Arc<RwLock<UsageSummary>>>() {
-            let snapshot = summary.read().await.clone();
-            update_tray_menu(&app, &snapshot);
-        }
-    });
 }
 
 #[cfg(test)]

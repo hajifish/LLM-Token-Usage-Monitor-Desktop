@@ -167,7 +167,7 @@ function Settings({ onBack }: SettingsProps) {
       ...config,
       providers: [
         ...config.providers,
-        { name: def.value, api_key: '', enabled: true, platform_token: null, alias: null },
+        { name: def.value, api_key: '', enabled: true, platform_token: null, alias: null, show_in_tray: true },
       ],
     });
   };

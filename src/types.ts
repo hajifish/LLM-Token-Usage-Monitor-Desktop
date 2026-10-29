@@ -55,6 +55,8 @@ export interface ProviderConfig {
   enabled: boolean;
   platform_token?: string | null;
   alias?: string | null;
+  /** 状态栏常显开关：是否在菜单栏托盘文字中展示该服务商。 */
+  show_in_tray: boolean;
 }
 
 export interface AppConfig {
@@ -64,6 +66,8 @@ export interface AppConfig {
   auto_check_update: boolean;
   /** 用户「忽略此版本」记录的新版本号；出现更新的版本时自动失效。 */
   skipped_update_version: string | null;
+  /** 托盘文字总开关：关闭后菜单栏仅显示图标。 */
+  tray_text_enabled: boolean;
 }
 
 /** 应用内更新的阶段 —— 与 Rust `updater::UpdatePhase` 严格一致（snake_case）。 */

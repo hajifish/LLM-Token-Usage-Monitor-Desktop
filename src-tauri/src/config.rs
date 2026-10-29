@@ -542,6 +542,7 @@ mod tests {
                     enabled: true,
                     platform_token: Some("plat-token-xyz".to_string()),
                     alias: Some("工作账号".to_string()),
+                    show_in_tray: true,
                 },
                 ProviderConfig {
                     name: "kimi".to_string(),
@@ -549,12 +550,47 @@ mod tests {
                     enabled: false,
                     platform_token: None,
                     alias: None,
+                    show_in_tray: true,
                 },
             ],
             refresh_interval: 120,
             auto_check_update: true,
             skipped_update_version: None,
+            tray_text_enabled: true,
         }
+    }
+
+    /// 旧版配置（无托盘显示字段）反序列化时由 serde default 兜底，无损加载。
+    #[test]
+    fn legacy_config_without_tray_fields_gets_defaults() {
+        let legacy = r#"{"providers":[{"name":"DeepSeek","api_key":"sk-x","enabled":true}],"refresh_interval":60}"#;
+        let cfg: AppConfig = serde_json::from_str(legacy).unwrap();
+        assert!(
+            cfg.tray_text_enabled,
+            "缺省的 tray_text_enabled 应默认为 true"
+        );
+        assert!(
+            cfg.providers[0].show_in_tray,
+            "缺省的 show_in_tray 应默认为 true"
+        );
+    }
+
+    /// 新增托盘字段随加密信封 roundtrip 不丢失。
+    #[test]
+    fn tray_fields_survive_save_load_roundtrip() {
+        let path = unique_temp_path("tray-roundtrip");
+        let mut cfg = sample_config();
+        cfg.tray_text_enabled = false;
+        cfg.providers[0].show_in_tray = false;
+        save_to_path(&path, &cfg, false).unwrap();
+
+        let (loaded, health) = load_from_path(&path);
+        assert!(!health.unreadable);
+        assert!(!loaded.tray_text_enabled);
+        assert!(!loaded.providers[0].show_in_tray);
+        assert!(loaded.providers[1].show_in_tray);
+
+        let _ = fs::remove_file(&path);
     }
 
     /// 构造一个「必然无法解密」的信封内容（密文首字节被篡改）。

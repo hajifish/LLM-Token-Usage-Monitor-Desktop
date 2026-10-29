@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
@@ -13,6 +13,9 @@ function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
   const { summary, loading, refreshing, error, refresh } = useUsage();
   const [trayTextEnabled, setTrayTextEnabled] = useState(true);
+  /** 球开关保存进行中标记：get_config → save_config 为读改写，连点两次会两次读到旧值丢一次切换 */
+  const togglingRef = useRef(false);
+  const [toggling, setToggling] = useState(false);
 
   /** 拉取托盘文字开关；从设置页切回时也刷新，避免设置页保存后状态过期 */
   const fetchTrayEnabled = useCallback(async () => {
@@ -28,8 +31,12 @@ function App() {
     fetchTrayEnabled();
   }, [fetchTrayEnabled, view]);
 
-  /** 球开关即时保存：save_config 唤醒调度器重建托盘，菜单栏立即生效 */
+  /** 球开关即时保存：save_config 唤醒调度器重建托盘，菜单栏立即生效；
+   *  保存进行中直接忽略再次触发，避免读改写竞态丢失一次切换 */
   const toggleTrayText = useCallback(async () => {
+    if (togglingRef.current) return;
+    togglingRef.current = true;
+    setToggling(true);
     try {
       const cfg = await invoke<AppConfig>('get_config');
       const next = { ...cfg, tray_text_enabled: !cfg.tray_text_enabled };
@@ -37,6 +44,9 @@ function App() {
       setTrayTextEnabled(next.tray_text_enabled);
     } catch (e) {
       console.error(e);
+    } finally {
+      togglingRef.current = false;
+      setToggling(false);
     }
   }, []);
 
@@ -66,7 +76,11 @@ function App() {
                 用量
               </h1>
               <div className="header-actions">
-                <label className="ball-toggle" title="菜单栏显示开关">
+                <label
+                  className="ball-toggle"
+                  title="菜单栏显示开关"
+                  aria-disabled={toggling}
+                >
                   <input type="checkbox" checked={trayTextEnabled} onChange={toggleTrayText} />
                   <span className="ball-dot" aria-hidden="true" />
                   <span className="ball-label">状态栏</span>

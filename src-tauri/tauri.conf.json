@@ -20,7 +20,7 @@
         "transparent": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "theme": "dark",
+        "theme": "Dark",
         "visible": false,
         "windowEffects": {
           "effects": ["hudWindow"],

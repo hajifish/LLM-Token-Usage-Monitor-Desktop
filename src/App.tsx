@@ -11,7 +11,7 @@ import type { AppConfig } from './types';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
-  const { summary, loading, error, refresh } = useUsage();
+  const { summary, loading, refreshing, error, refresh } = useUsage();
   const [trayTextEnabled, setTrayTextEnabled] = useState(true);
 
   /** 拉取托盘文字开关；从设置页切回时也刷新，避免设置页保存后状态过期 */
@@ -74,7 +74,11 @@ function App() {
                 {summary?.last_updated && (
                   <span className="header-time">{summary.last_updated}</span>
                 )}
-                <button className="header-refresh-btn" onClick={refresh} title="刷新数据">
+                <button
+                  className={`header-refresh-btn${refreshing ? ' is-refreshing' : ''}`}
+                  onClick={refresh}
+                  title="刷新数据"
+                >
                   <svg
                     width="14"
                     height="14"
@@ -112,7 +116,13 @@ function App() {
               </div>
             </div>
             <UpdateNotice />
-            <UsagePanel summary={summary} loading={loading} error={error} refresh={refresh} />
+            <UsagePanel
+              summary={summary}
+              loading={loading}
+              refreshing={refreshing}
+              error={error}
+              refresh={refresh}
+            />
           </div>
         ) : (
           <Settings onBack={() => setView('usage')} />

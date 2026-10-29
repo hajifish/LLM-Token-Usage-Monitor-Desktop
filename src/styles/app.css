@@ -197,6 +197,16 @@
   color: var(--system-tertiary-label);
 }
 
+/* 手动刷新进行中：保留旧数据，整体轻微降透明度；顶栏刷新按钮旋转 */
+.usage-panel.is-refreshing {
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.header-refresh-btn.is-refreshing svg {
+  animation: spin 0.8s linear infinite;
+}
+
 /* Total balance card */
 .total-card {
   text-align: center;

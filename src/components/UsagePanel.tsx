@@ -158,11 +158,12 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
 interface UsagePanelProps {
   summary: UsageSummary | null;
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   refresh: () => void;
 }
 
-function UsagePanel({ summary, loading, error, refresh }: UsagePanelProps) {
+function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanelProps) {
   if (loading) {
     return (
       <div className="usage-panel loading">
@@ -196,7 +197,7 @@ function UsagePanel({ summary, loading, error, refresh }: UsagePanelProps) {
   }
 
   return (
-    <div className="usage-panel">
+    <div className={`usage-panel${refreshing ? ' is-refreshing' : ''}`}>
       <div className="card-grid">
         {summary.providers.map((p) => (
           <ProviderCard key={`${p.name}-${p.alias}`} p={p} />

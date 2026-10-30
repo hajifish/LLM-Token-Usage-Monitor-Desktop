@@ -272,7 +272,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         }
 
         // --- 构建 tooltip（鼠标悬停提示） ---
-        let mut tooltip_lines = vec!["LLM Token Monitor".to_string()];
+        let mut tooltip_lines = vec!["Token Usage".to_string()];
         for p in &summary.providers {
             if let Some(ref balance) = p.balance {
                 if balance.is_percent() {

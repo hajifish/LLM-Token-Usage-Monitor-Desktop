@@ -251,7 +251,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(tray_icon)
         .icon_as_template(false) // 全彩图标，不启用模板模式
         .menu(&menu)
-        .tooltip("LLM Token Monitor")
+        .tooltip("Token Usage")
         .on_tray_icon_event(|tray, _event| {
             // 每次点击托盘图标时触发后台刷新，数据在下次打开菜单时可见。
             // macOS 系统行为：点击菜单项后菜单必然关闭，因此刷新由托盘图标点击触发，

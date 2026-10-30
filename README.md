@@ -159,6 +159,12 @@ npm run tauri build
 >
 > 需要完整复现发版构建时，请设置 `TAURI_SIGNING_PRIVATE_KEY`（私钥内容，或指向密钥文件的路径）及其口令 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥属于敏感信息，不要提交到仓库。
 
+### 版本号与发版机制
+
+- 仓库内静态版本号（package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json）**仅为本地开发构建展示用**，不跟随每次发布手工对齐；真实版本号由发版流水线在构建时按 `v*` tag 总数派生（`0.(2+COUNT/256).(COUNT%256)`），全局只升不降（应用内更新按 semver 比较）。
+- master 每次 push 会由 auto-tag 自动创建日期 tag（`vYYYY.MM.DD.N`，纯记账行为）；**发版构建需手动触发**（`gh workflow run release.yml --ref <tag>`），构建产物进入 draft Release，手动发布草稿后更新才对外分发（发布即更新闸门）。因此可感知的版本号只在真正发版时前进，语义上约等于「发布次数计数器」。
+- CI 有一条版本一致性守卫：上述 5 处静态版本字段必须互相一致（仅要求内部自洽，不要求与最新发布一致），不一致时 PR 构建直接失败。
+
 ### 贡献指南
 
 欢迎提交 Issue 和 Pull Request。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。

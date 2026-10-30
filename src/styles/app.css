@@ -3,7 +3,6 @@
   --system-bg: #1e1e1e;
   --system-secondary-bg: #2d2d2d;
   --system-tertiary-bg: #3a3a3a;
-  --system-card-bg: #2a2a2a;
   --system-separator: rgba(255, 255, 255, 0.1);
   
   --system-label: #ffffff;
@@ -15,16 +14,14 @@
   --system-green: #30d158;
   --system-orange: #ff9f0a;
   --system-red: #ff453a;
-  --system-purple: #bf5af2;
-  --system-pink: #ff375f;
-  
+
   --system-accent: var(--system-blue);
   
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
   font-size: 14px;
   line-height: 1.47;
   color: var(--system-label);
-  background-color: var(--system-bg);
+  background-color: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -36,7 +33,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--system-bg);
+  background: transparent;
 }
 
 /* ===== Header with settings icon ===== */
@@ -44,8 +41,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  background: var(--system-secondary-bg);
+  padding: 12px 16px 12px 76px;
+  background: rgba(255, 255, 255, 0.04);
   border-bottom: 1px solid var(--system-separator);
 }
 
@@ -93,6 +90,53 @@
   color: var(--system-tertiary-label);
   font-variant-numeric: tabular-nums;
   margin-right: 2px;
+}
+
+/* ===== 球开关（状态栏显示总开关，仿参考项目：选中白实心 / 未选空心环） ===== */
+.ball-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  margin-right: 4px;
+}
+
+.ball-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ball-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  background: transparent;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.ball-toggle input:checked + .ball-dot {
+  background: #fff;
+  border-color: #fff;
+}
+
+/* 键盘 Tab 聚焦时给出可见焦点环（input 被 opacity:0 隐藏，焦点落在圆点上） */
+.ball-toggle input:focus-visible + .ball-dot {
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+}
+
+.ball-label {
+  font-size: 11px;
+  color: var(--system-secondary-label);
+  transition: color 0.15s;
+}
+
+.ball-toggle input:checked ~ .ball-label {
+  color: var(--system-label);
 }
 
 .header-refresh-btn,
@@ -143,7 +187,7 @@
   padding: 16px;
   flex: 1;
   overflow-y: auto;
-  background: var(--system-bg);
+  background: transparent;
 }
 
 .usage-panel.loading, .usage-panel.empty {
@@ -155,32 +199,14 @@
   color: var(--system-tertiary-label);
 }
 
-/* Total balance card */
-.total-card {
-  text-align: center;
-  padding: 20px 16px;
-  margin-bottom: 16px;
-  background: var(--system-card-bg);
-  border-radius: 12px;
-  border: 1px solid var(--system-separator);
+/* 手动刷新进行中：保留旧数据，整体轻微降透明度；顶栏刷新按钮旋转 */
+.usage-panel.is-refreshing {
+  opacity: 0.6;
+  transition: opacity 0.15s;
 }
 
-.total-label {
-  display: block;
-  font-size: 11px;
-  color: var(--system-secondary-label);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin-bottom: 6px;
-}
-
-.total-value {
-  display: block;
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--system-green);
-  letter-spacing: -0.5px;
-  font-variant-numeric: tabular-nums;
+.header-refresh-btn.is-refreshing svg {
+  animation: spin 0.8s linear infinite;
 }
 
 /* Card grid - auto wrap layout */
@@ -193,14 +219,14 @@
 /* Provider card (macOS card style) */
 .p-card {
   padding: 16px;
-  background: var(--system-card-bg);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   border: 1px solid var(--system-separator);
   transition: all 0.2s ease;
 }
 
 .p-card:hover {
-  background: var(--system-tertiary-bg);
+  background: rgba(255, 255, 255, 0.10);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
@@ -282,12 +308,6 @@
   object-fit: contain;
   background: rgba(255,255,255,0.06);
   box-shadow: 0 1px 3px rgba(0,0,0,0.25);
-}
-
-.p-card-value {
-  font-size: 17px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Big main number */
@@ -389,43 +409,11 @@
   margin-top: 4px;
 }
 
-/* Footer */
-.panel-footer {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding-top: 16px;
-  margin-top: 16px;
-  border-top: 1px solid var(--system-separator);
-}
-
-.footer-time {
-  font-size: 12px;
-  color: var(--system-tertiary-label);
-}
-
-.footer-btn {
-  border: none;
-  background: rgba(10, 132, 255, 0.12);
-  color: var(--system-blue);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 12px;
-  border-radius: 6px;
-  transition: all 0.15s;
-}
-
-.footer-btn:hover {
-  background: rgba(10, 132, 255, 0.2);
-}
-
 /* Empty / loading */
 .empty-icon {
   width: 48px; height: 48px;
   border-radius: 12px;
-  background: var(--system-secondary-bg);
+  background: rgba(255, 255, 255, 0.06);
   display: flex; align-items: center; justify-content: center;
   font-size: 24px; 
   color: var(--system-tertiary-label);
@@ -451,7 +439,7 @@
   padding: 7px 16px;
   border: 1px solid var(--system-separator);
   border-radius: 6px;
-  background: var(--system-secondary-bg);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--system-blue);
   cursor: pointer;
   font-size: 13px;
@@ -466,7 +454,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--system-bg);
+  background: transparent;
 }
 
 .settings.loading {
@@ -479,8 +467,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  background: var(--system-secondary-bg);
+  padding: 10px 16px 10px 76px;
+  background: rgba(255, 255, 255, 0.04);
   border-bottom: 1px solid var(--system-separator);
   flex-shrink: 0;
 }
@@ -553,7 +541,7 @@
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
-  background: var(--system-card-bg);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 10px;
   border: 1px solid var(--system-separator);
 }
@@ -610,7 +598,7 @@ input[type="number"], input[type="password"], input[type="text"], select {
   padding: 6px 10px;
   border: 1px solid var(--system-separator);
   border-radius: 6px;
-  background: var(--system-secondary-bg);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--system-label);
   font-size: 13px;
   width: 100%;
@@ -626,7 +614,7 @@ input:focus, select:focus {
 .provider-config {
   padding: 10px 12px;
   margin-bottom: 8px;
-  background: var(--system-card-bg);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   border: 1px solid var(--system-separator);
 }
@@ -683,7 +671,7 @@ input:focus, select:focus {
   cursor: pointer;
   font-size: 11px;
 }
-.cancel-btn:hover { background: var(--system-quaternary-fill); }
+.cancel-btn:hover { background: rgba(255, 255, 255, 0.1); }
 
 .ds-hint {
   display: block;
@@ -826,9 +814,39 @@ input:focus, select:focus {
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  background: var(--system-card-bg);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 10px;
   border: 1px solid var(--system-separator);
+}
+
+/* ===== 状态栏显示设置 ===== */
+.tray-display-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  border: 1px solid var(--system-separator);
+}
+
+.tray-provider-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.tray-provider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--system-secondary-label);
+  cursor: pointer;
+}
+
+.tray-provider-row input {
+  width: auto;
 }
 
 .update-row {

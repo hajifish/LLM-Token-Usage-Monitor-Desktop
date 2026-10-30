@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
@@ -6,10 +7,48 @@ import UpdateNotice from './components/UpdateNotice';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
+import type { AppConfig } from './types';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
-  const { summary, loading, error, refresh } = useUsage();
+  const { summary, loading, refreshing, error, refresh } = useUsage();
+  const [trayTextEnabled, setTrayTextEnabled] = useState(true);
+  /** 球开关保存进行中标记：get_config → save_config 为读改写，连点两次会两次读到旧值丢一次切换 */
+  const togglingRef = useRef(false);
+  const [toggling, setToggling] = useState(false);
+
+  /** 拉取托盘文字开关；从设置页切回时也刷新，避免设置页保存后状态过期 */
+  const fetchTrayEnabled = useCallback(async () => {
+    try {
+      const cfg = await invoke<AppConfig>('get_config');
+      setTrayTextEnabled(cfg.tray_text_enabled);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTrayEnabled();
+  }, [fetchTrayEnabled, view]);
+
+  /** 球开关即时保存：save_config 唤醒调度器重建托盘，菜单栏立即生效；
+   *  保存进行中直接忽略再次触发，避免读改写竞态丢失一次切换 */
+  const toggleTrayText = useCallback(async () => {
+    if (togglingRef.current) return;
+    togglingRef.current = true;
+    setToggling(true);
+    try {
+      const cfg = await invoke<AppConfig>('get_config');
+      const next = { ...cfg, tray_text_enabled: !cfg.tray_text_enabled };
+      await invoke('save_config', { newConfig: next });
+      setTrayTextEnabled(next.tray_text_enabled);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      togglingRef.current = false;
+      setToggling(false);
+    }
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<string>('navigate', (event) => {
@@ -29,7 +68,7 @@ function App() {
       <div className="app">
         {view === 'usage' ? (
           <div className="usage-view">
-            <div className="app-header">
+            <div className="app-header" data-tauri-drag-region>
               <h1 className="app-title">
                 <span className="app-title-logo-wrap">
                   <img src="/tray-logo.png" alt="" className="app-title-logo" />
@@ -37,10 +76,23 @@ function App() {
                 用量
               </h1>
               <div className="header-actions">
+                <label
+                  className="ball-toggle"
+                  title="菜单栏显示开关"
+                  aria-disabled={toggling}
+                >
+                  <input type="checkbox" checked={trayTextEnabled} onChange={toggleTrayText} />
+                  <span className="ball-dot" aria-hidden="true" />
+                  <span className="ball-label">状态栏</span>
+                </label>
                 {summary?.last_updated && (
                   <span className="header-time">{summary.last_updated}</span>
                 )}
-                <button className="header-refresh-btn" onClick={refresh} title="刷新数据">
+                <button
+                  className={`header-refresh-btn${refreshing ? ' is-refreshing' : ''}`}
+                  onClick={refresh}
+                  title="刷新数据"
+                >
                   <svg
                     width="14"
                     height="14"
@@ -78,7 +130,13 @@ function App() {
               </div>
             </div>
             <UpdateNotice />
-            <UsagePanel summary={summary} loading={loading} error={error} refresh={refresh} />
+            <UsagePanel
+              summary={summary}
+              loading={loading}
+              refreshing={refreshing}
+              error={error}
+              refresh={refresh}
+            />
           </div>
         ) : (
           <Settings onBack={() => setView('usage')} />

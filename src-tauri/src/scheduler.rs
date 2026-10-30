@@ -3,7 +3,7 @@ use crate::providers;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    AppHandle, Emitter,
+    AppHandle, Emitter, Manager,
 };
 use tokio::sync::{Notify, RwLock};
 use tokio::time::Duration;
@@ -213,7 +213,7 @@ async fn poll_providers(
     }
 
     // 更新托盘菜单和 tooltip
-    update_tray_menu(app_handle, &summary);
+    update_tray_menu(app_handle, &summary).await;
 
     // 更新托盘图标警告打点（余量不足时显示红/黄点）
     crate::tray::update_tray_badge(app_handle, &summary);
@@ -222,8 +222,18 @@ async fn poll_providers(
     let _ = app_handle.emit("usage-updated", &summary);
 }
 
-fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
+async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
     if let Some(tray) = app_handle.tray_by_id("main_tray") {
+        // --- 状态栏常显文字（菜单栏图标旁的主指标摘要） ---
+        let tray_config = match app_handle.try_state::<Arc<RwLock<AppConfig>>>() {
+            Some(state) => state.read().await.clone(),
+            None => AppConfig::default(),
+        };
+        let title = crate::tray::build_tray_title(&tray_config, summary);
+        if let Err(e) = tray.set_title(title.as_deref()) {
+            log::warn!("Failed to update tray title: {}", e);
+        }
+
         // --- 构建 tooltip（鼠标悬停提示） ---
         let mut tooltip_lines = vec!["LLM Token Monitor".to_string()];
         for p in &summary.providers {

@@ -16,6 +16,11 @@ use models::UsageSummary;
 use scheduler::Scheduler;
 use tauri_plugin_log::{Target, TargetKind};
 
+/// 判断本次启动是否应显示主窗口：开机自启以 --minimized 启动时保持静默驻留托盘。
+fn should_show_window(args: &[String]) -> bool {
+    !args.iter().any(|a| a == "--minimized")
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -81,6 +86,36 @@ pub fn run() {
             updater::install_update,
             updater::set_skipped_update_version
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 就绪后再显示窗口，避免窗体未完成渲染时闪现矩形；
+            // 开机自启（--minimized）保持静默，仅驻留托盘。
+            if let tauri::RunEvent::Ready = event {
+                let args: Vec<String> = std::env::args().collect();
+                if should_show_window(&args) {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+        });
+}
+
+#[cfg(test)]
+mod launch_args_tests {
+    use super::should_show_window;
+
+    #[test]
+    fn minimized_flag_hides_window() {
+        let args = vec!["app".to_string(), "--minimized".to_string()];
+        assert!(!should_show_window(&args));
+    }
+
+    #[test]
+    fn normal_launch_shows_window() {
+        let args = vec!["app".to_string()];
+        assert!(should_show_window(&args));
+    }
 }

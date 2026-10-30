@@ -103,51 +103,19 @@
   margin-right: 2px;
 }
 
-/* ===== 球开关（状态栏显示总开关，仿参考项目：选中白实心 / 未选空心环） ===== */
-.ball-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
-  margin-right: 4px;
-}
-
-.ball-toggle input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.ball-dot {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.45);
-  background: transparent;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.ball-toggle input:checked + .ball-dot {
-  background: #fff;
-  border-color: #fff;
-}
-
-/* 键盘 Tab 聚焦时给出可见焦点环（input 被 opacity:0 隐藏，焦点落在圆点上） */
-.ball-toggle input:focus-visible + .ball-dot {
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
-}
-
-.ball-label {
-  font-size: 11px;
+/* ===== 顶栏 wordmark（软件名：token usage） ===== */
+.app-title-wordmark {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
   color: var(--system-secondary-label);
-  transition: color 0.15s;
+  transform: translateY(-0.5px);
 }
 
-.ball-toggle input:checked ~ .ball-label {
-  color: var(--system-label);
+.wordmark-accent {
+  color: #4a9eff;
+  font-weight: 700;
+  margin-left: 5px;
 }
 
 .header-refresh-btn,

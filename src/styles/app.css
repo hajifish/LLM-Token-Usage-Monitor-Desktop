@@ -85,6 +85,17 @@
   gap: 6px;
 }
 
+/* 顶栏拖动：标题区（logo/文字）不拦截点击，让 mousedown 落到
+   带 data-tauri-drag-region 的 .app-header 上触发窗口拖动 */
+.app-title,
+.app-title * {
+  pointer-events: none;
+}
+
+.settings-header h2 {
+  pointer-events: none;
+}
+
 .header-time {
   font-size: 11px;
   color: var(--system-tertiary-label);

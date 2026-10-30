@@ -338,6 +338,14 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         };
         critical_ok &= menu.append(&open_item).is_ok();
 
+        // 5.5) 更新入口：发现新版本时文案变为版本号，点击直达主窗口的更新横幅。
+        // 条目经 create_update_item 创建并登记句柄，之后状态变化走原地改文案，
+        // 不再触发菜单整体重建（重建与用户菜单交互并发会触发 AppKit panic）。
+        let update_label = crate::updater::tray_item_label(app_handle);
+        if let Ok(update_item) = crate::tray::create_update_item(app_handle, &update_label) {
+            critical_ok &= menu.append(&update_item).is_ok();
+        }
+
         // 6) 分隔线 → 设置 + 退出（同一分隔区）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;

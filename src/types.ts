@@ -60,6 +60,42 @@ export interface ProviderConfig {
 export interface AppConfig {
   providers: ProviderConfig[];
   refresh_interval: number;
+  /** 是否自动检查更新（启动后 60 秒首查，之后每 24 小时一次）。 */
+  auto_check_update: boolean;
+  /** 用户「忽略此版本」记录的新版本号；出现更新的版本时自动失效。 */
+  skipped_update_version: string | null;
+}
+
+/** 应用内更新的阶段 —— 与 Rust `updater::UpdatePhase` 严格一致（snake_case）。 */
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'up_to_date'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'installing'
+  | 'failed';
+
+/** 更新状态快照 —— 与 Rust `updater::UpdateStatus` 严格一致（snake_case）。 */
+export interface UpdateStatus {
+  phase: UpdatePhase;
+  /** 当前应用版本（构建时写入的 tauri.conf.json version）。 */
+  current_version: string;
+  /** 可用新版本号；无更新时为 null。 */
+  version: string | null;
+  /** 更新说明（来自 Release notes）。 */
+  notes: string | null;
+  /** 新版本发布时间。 */
+  date: string | null;
+  /** 已下载字节数。 */
+  downloaded: number;
+  /** 更新包总字节数（服务端未提供时为 null）。 */
+  total: number | null;
+  /** 状态说明文案（如「已是最新版本」「已忽略该版本」）。 */
+  message: string | null;
+  /** 最近一次检查完成时间。 */
+  last_checked: string | null;
 }
 
 /**

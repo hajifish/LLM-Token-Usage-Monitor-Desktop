@@ -51,6 +51,16 @@ pub struct ProviderConfig {
 pub struct AppConfig {
     pub providers: Vec<ProviderConfig>,
     pub refresh_interval: u64,
+    /// 是否自动检查更新（启动 60 秒后首查，之后每 24 小时一次）
+    #[serde(default = "default_auto_check_update")]
+    pub auto_check_update: bool,
+    /// 用户「忽略此版本」记录的新版本号；仅对完全相同的版本号生效
+    #[serde(default)]
+    pub skipped_update_version: Option<String>,
+}
+
+fn default_auto_check_update() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -58,6 +68,8 @@ impl Default for AppConfig {
         Self {
             providers: Vec::new(),
             refresh_interval: 60,
+            auto_check_update: default_auto_check_update(),
+            skipped_update_version: None,
         }
     }
 }

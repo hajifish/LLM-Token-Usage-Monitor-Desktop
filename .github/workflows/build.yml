@@ -98,8 +98,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # 仅做构建校验：关闭更新包签名，避免依赖签名私钥（fork PR 拿不到 Secrets）。
+      # 发版走 release.yml，那里才会生成签名与 latest.json。
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@51a9f1156b33df106d827c3a78f8f894946c5faa # v0.5
+        with:
+          args: '--config {"bundle":{"createUpdaterArtifacts":false}}'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -109,6 +113,7 @@ jobs:
           name: tauri-${{ matrix.os }}
           path: |
             src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage

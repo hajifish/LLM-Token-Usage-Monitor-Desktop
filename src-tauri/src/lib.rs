@@ -5,6 +5,7 @@ mod providers;
 mod scheduler;
 mod secrets;
 mod tray;
+mod updater;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -34,6 +35,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        // 应用内自动更新：端点与公钥在 tauri.conf.json 的 plugins.updater 中配置
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             tray::create_tray(app.handle())?;
             let (app_config, config_health) = config::load(app.handle());
@@ -45,13 +48,17 @@ pub fn run() {
             app.manage(summary_state.clone());
             app.manage(health_state.clone());
             app.manage(notify.clone());
+            app.manage(updater::UpdateState::new(
+                app.package_info().version.to_string(),
+            ));
             let sched = Scheduler::new_with_notify(
                 app.handle().clone(),
-                config_state,
+                config_state.clone(),
                 summary_state,
                 notify,
             );
             sched.start();
+            updater::spawn_auto_check(app.handle().clone(), config_state);
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())
@@ -67,7 +74,12 @@ pub fn run() {
             get_config,
             get_config_health,
             save_config,
-            trigger_refresh
+            trigger_refresh,
+            updater::get_update_status,
+            updater::check_update,
+            updater::download_update,
+            updater::install_update,
+            updater::set_skipped_update_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

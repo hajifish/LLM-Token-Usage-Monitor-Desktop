@@ -217,7 +217,11 @@ fn user_error_msg(e: &tauri_plugin_updater::Error) -> String {
 }
 
 /// 执行一次检查并更新状态；返回检查后的状态快照。
-async fn run_check(app: &AppHandle) -> UpdateStatus {
+///
+/// `manual` 为用户主动触发（托盘条目 / 设置页按钮）：此时无视「忽略此版本」
+/// 记录，重新弹出可安装状态，让用户重新选择安装或再次忽略；自动定时检查
+/// 仍尊重忽略记录，不重复打扰。
+async fn run_check(app: &AppHandle, manual: bool) -> UpdateStatus {
     mutate_status(app, |s| {
         s.phase = UpdatePhase::Checking;
         s.message = Some("正在检查更新…".to_string());
@@ -240,7 +244,7 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
                         .to_string()
                 })
             });
-            if skipped.as_deref() == Some(version.as_str()) {
+            if !manual && skipped.as_deref() == Some(version.as_str()) {
                 clear_pending(app);
                 let message = format!("已忽略 v{}", version);
                 mutate_status(app, |s| {
@@ -300,7 +304,39 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
             });
         }
     }
-    snapshot(app)
+    let final_status = snapshot(app);
+    notify_result(app, manual, &final_status);
+    final_status
+}
+
+/// 检查结果系统通知。
+///
+/// 托盘菜单点击即收起（macOS 系统行为），菜单里的状态文案一闪而过；
+/// 通知驻留通知中心，用户可在方便时查看、手动关闭。手动检查始终反馈
+/// 结果；自动检查仅在发现新版本时提醒，避免「已是最新」类噪音。
+fn notify_result(app: &AppHandle, manual: bool, status: &UpdateStatus) {
+    use tauri_plugin_notification::NotificationExt;
+    let body = match (&status.phase, status.version.as_deref()) {
+        (UpdatePhase::Available | UpdatePhase::Ready, Some(v)) => {
+            format!("发现新版本 v{v}，可打开应用安装")
+        }
+        (UpdatePhase::Failed | UpdatePhase::UpToDate, _) if manual => {
+            status.message.clone().unwrap_or_default()
+        }
+        _ => return,
+    };
+    if body.is_empty() {
+        return;
+    }
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title("应用更新")
+        .body(body)
+        .show()
+    {
+        log::warn!("更新: 发送通知失败: {}", e);
+    }
 }
 
 /// 已下载更新包的字节数（用于把「已下载」状态复原到界面上）。
@@ -324,32 +360,42 @@ pub fn spawn_auto_check(app: AppHandle, config: Arc<AsyncRwLock<AppConfig>>) {
             let enabled = config.read().await.auto_check_update;
             // 开发构建跳过自动检查：latest.json 面向正式构建，调试版本反复弹提示没有意义
             if enabled && !cfg!(debug_assertions) {
-                let _ = run_check(&app).await;
+                let _ = run_check(&app, false).await;
             }
             tokio::time::sleep(CHECK_INTERVAL).await;
         }
     });
 }
 
-/// 后台触发一次检查（托盘菜单入口，不阻塞调用方）。
+/// 后台触发一次检查（托盘菜单入口，不阻塞调用方）。托盘点击即用户主动检查。
 pub fn spawn_check(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         if snapshot(&app).phase.is_busy() {
             return;
         }
-        let _ = run_check(&app).await;
+        let _ = run_check(&app, true).await;
     });
 }
 
-/// 托盘菜单中更新条目的文案（scheduler 每次重建菜单时读取）。
+/// 托盘菜单中更新条目的文案：携带最近一次检查结果，再次打开菜单无需
+/// 任何操作即可看到（结果同时经系统通知驻留通知中心）。
 pub fn tray_item_label(app: &AppHandle) -> String {
     let status = snapshot(app);
-    match (status.phase, status.version) {
-        (UpdatePhase::Available, Some(v)) => format!("⬆ 新版本 v{} 可用", v),
-        (UpdatePhase::Ready, Some(v)) => format!("⬆ v{} 待安装", v),
-        (UpdatePhase::Downloading, Some(v)) => format!("⬇ 正在下载 v{}", v),
+    label_for(status.phase, status.version.as_deref())
+}
+
+/// `tray_item_label` 的纯函数部分，便于单元测试。
+fn label_for(phase: UpdatePhase, version: Option<&str>) -> String {
+    match (phase, version) {
+        (UpdatePhase::Available, Some(v)) => format!("⬆ 新版本 v{v} 可用"),
+        (UpdatePhase::Ready, Some(v)) => format!("⬆ v{v} 待安装"),
+        (UpdatePhase::Downloading, Some(v)) => format!("⬇ 正在下载 v{v}"),
         (UpdatePhase::Installing, _) => "正在安装更新…".to_string(),
         (UpdatePhase::Checking, _) => "正在检查更新…".to_string(),
+        // UpToDate 带版本号 = 该版本曾被「忽略」；手动检查可重新弹出
+        (UpdatePhase::UpToDate, Some(v)) => format!("已忽略 v{v}（点此重新检查）"),
+        (UpdatePhase::UpToDate, None) => "✓ 已是最新".to_string(),
+        (UpdatePhase::Failed, _) => "⚠ 检查失败（点此重试）".to_string(),
         _ => "检查更新".to_string(),
     }
 }
@@ -385,7 +431,7 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateStatus, String> {
     if current.phase.is_busy() {
         return Ok(current);
     }
-    Ok(run_check(&app).await)
+    Ok(run_check(&app, true).await)
 }
 
 #[tauri::command]
@@ -614,5 +660,25 @@ mod tests {
             clean_notes(Some(" 修复若干问题 ")),
             Some("修复若干问题".to_string())
         );
+    }
+
+    #[test]
+    fn tray_label_carries_last_check_result() {
+        // 检查结果在托盘文案中可见：无需用户再次点开任何界面
+        assert_eq!(label_for(UpdatePhase::UpToDate, None), "✓ 已是最新");
+        assert_eq!(
+            label_for(UpdatePhase::UpToDate, Some("0.2.18")),
+            "已忽略 v0.2.18（点此重新检查）"
+        );
+        assert_eq!(
+            label_for(UpdatePhase::Failed, None),
+            "⚠ 检查失败（点此重试）"
+        );
+        // 有更新在手 / 空闲态的既有文案保持不变
+        assert_eq!(
+            label_for(UpdatePhase::Available, Some("0.2.18")),
+            "⬆ 新版本 v0.2.18 可用"
+        );
+        assert_eq!(label_for(UpdatePhase::Idle, None), "检查更新");
     }
 }

@@ -3,7 +3,7 @@ use crate::providers;
 use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, Wry,
 };
 use tokio::sync::{Notify, RwLock};
 use tokio::time::Duration;
@@ -62,6 +62,43 @@ fn format_provider_line(p: &ProviderStatus) -> String {
     } else {
         format!("{} {}  无数据", dot, p.alias)
     }
+}
+
+/// 供应商列表签名：name|alias 序列。签名不变时托盘菜单只原地改写文案。
+fn provider_signature(summary: &UsageSummary) -> String {
+    summary
+        .providers
+        .iter()
+        .map(|p| format!("{}|{}", p.name, p.alias))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// 「更新于 HH:MM」展示文案（取 last_updated 的时:分部分）。
+fn update_time_text(summary: &UsageSummary) -> String {
+    summary
+        .last_updated
+        .split(' ')
+        .nth(1)
+        .and_then(|t| t.rsplit_once(':'))
+        .map(|(h, m)| format!("{}:{}", h, m))
+        .unwrap_or_else(|| summary.last_updated.clone())
+}
+
+/// 托盘菜单条目句柄。菜单只构建一次，数据轮询仅原地 set_text 改写文案，
+/// 不再 set_menu 整体替换菜单对象 —— 替换与用户菜单交互并发时 AppKit
+/// 会在动作分发中 panic（06337ea 对「检查更新」条目已用同一模式修复，
+/// 本结构把该模式推广到数据轮询的供应商条目与时间条目）。
+#[derive(Default)]
+pub struct TrayMenuState {
+    inner: std::sync::Mutex<Option<TrayMenuHandles>>,
+}
+
+#[derive(Default)]
+struct TrayMenuHandles {
+    provider_items: Vec<MenuItem<Wry>>,
+    time_item: Option<MenuItem<Wry>>,
+    signature: String,
 }
 
 pub struct Scheduler {
@@ -265,7 +302,30 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         tooltip_lines.push(format!("更新: {}", summary.last_updated));
         let _ = tray.set_tooltip(Some(&tooltip_lines.join("\n")));
 
-        // --- 动态构建主菜单（供应商状态内联展开，不再用二级子菜单） ---
+        // --- 菜单：签名未变时仅原地改写条目文案，不重建菜单对象 ---
+        // set_menu 整体替换与用户菜单交互并发会触发 AppKit 闪退
+        // （06337ea 修掉了更新状态触发的重建，数据轮询的重建由本处根治）。
+        let signature = provider_signature(summary);
+        if let Some(state) = app_handle.try_state::<TrayMenuState>() {
+            let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(handles) = inner.as_mut() {
+                if handles.signature == signature {
+                    for (item, p) in handles
+                        .provider_items
+                        .iter()
+                        .zip(summary.providers.iter())
+                    {
+                        let _ = item.set_text(&format_provider_line(p));
+                    }
+                    if let Some(time_item) = &handles.time_item {
+                        let _ = time_item.set_text(&format!("更新于 {}", update_time_text(summary)));
+                    }
+                    return;
+                }
+            }
+        }
+
+        // --- 整体重建（首次 / 服务商列表变化才走这里） ---
         let Ok(menu) = Menu::new(app_handle) else {
             return;
         };
@@ -276,6 +336,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
 
         // 1) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
         const MAX_PROVIDER_ITEMS: usize = 50;
+        let mut provider_items = Vec::new();
         for (i, p) in summary
             .providers
             .iter()
@@ -291,6 +352,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 None::<&str>,
             ) {
                 let _ = menu.append(&item); // 供应商展示项失败可忽略
+                provider_items.push(item);
             }
         }
 
@@ -314,21 +376,16 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         }
 
         // 4) 更新于 HH:MM（disabled 展示项，紧跟供应商状态）
-        let update_time = summary
-            .last_updated
-            .split(' ')
-            .nth(1)
-            .and_then(|t| t.rsplit_once(':'))
-            .map(|(h, m)| format!("{}:{}", h, m))
-            .unwrap_or_else(|| summary.last_updated.clone());
+        let mut time_item_handle = None;
         if let Ok(time_item) = MenuItem::with_id(
             app_handle,
             "update-time",
-            format!("更新于 {}", update_time),
+            format!("更新于 {}", update_time_text(summary)),
             false,
             None::<&str>,
         ) {
             let _ = menu.append(&time_item);
+            time_item_handle = Some(time_item);
         }
 
         // 5) 分隔线 → 打开主页
@@ -379,6 +436,22 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 仅当关键项全部装配成功才替换菜单，否则保留旧菜单
         if critical_ok {
             let _ = tray.set_menu(Some(menu));
+            // 登记条目句柄：此后数据轮询仅原地改写文案，不再走重建路径
+            let handles = TrayMenuHandles {
+                provider_items,
+                time_item: time_item_handle,
+                signature,
+            };
+            match app_handle.try_state::<TrayMenuState>() {
+                Some(state) => {
+                    *state.inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(handles);
+                }
+                None => {
+                    app_handle.manage(TrayMenuState {
+                        inner: std::sync::Mutex::new(Some(handles)),
+                    });
+                }
+            }
         }
     }
     let _ = app_handle;
@@ -388,6 +461,63 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
 mod tests {
     use super::*;
     use crate::models::{BalanceData, ProviderStatus};
+
+    // ---------- provider_signature ----------
+
+    fn status_with(name: &str, alias: &str) -> ProviderStatus {
+        ProviderStatus {
+            name: name.to_string(),
+            alias: alias.to_string(),
+            enabled: true,
+            balance: None,
+            usage: None,
+            error: None,
+            quota_infos: None,
+        }
+    }
+
+    #[test]
+    fn signature_empty_when_no_providers() {
+        let s = UsageSummary::default();
+        assert_eq!(provider_signature(&s), "");
+    }
+
+    #[test]
+    fn signature_distinguishes_name_and_alias() {
+        let a = UsageSummary {
+            providers: vec![status_with("DeepSeek", "工作号")],
+            ..Default::default()
+        };
+        let b = UsageSummary {
+            providers: vec![status_with("DeepSeek", "私人号")],
+            ..Default::default()
+        };
+        assert_ne!(provider_signature(&a), provider_signature(&b), "同名不同别名应视为不同签名");
+    }
+
+    #[test]
+    fn signature_changes_with_provider_count() {
+        let one = UsageSummary {
+            providers: vec![status_with("DeepSeek", "DeepSeek")],
+            ..Default::default()
+        };
+        let mut two = one.clone();
+        two.providers.push(status_with("Zhipu", "Zhipu"));
+        assert_ne!(provider_signature(&one), provider_signature(&two));
+    }
+
+    #[test]
+    fn signature_stable_for_same_providers() {
+        let a = UsageSummary {
+            providers: vec![
+                status_with("DeepSeek", "DeepSeek"),
+                status_with("Zhipu", "智谱"),
+            ],
+            ..Default::default()
+        };
+        let b = a.clone();
+        assert_eq!(provider_signature(&a), provider_signature(&b));
+    }
 
     // ---------- progress_bar ----------
 

@@ -159,6 +159,12 @@ Built artifacts will be located in `src-tauri/target/release/bundle/`.
 >
 > To reproduce a full release build, set `TAURI_SIGNING_PRIVATE_KEY` (the key contents, or a path to the key file) and its password `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The private key is sensitive — never commit it.
 
+### Versioning and Release Mechanics
+
+- The static version numbers in the repo (package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json) exist **only for local development builds** and are not hand-aligned with every release. The real version is derived at build time by the release pipeline from the total count of `v*` tags (`0.(2+COUNT/256).(COUNT%256)`), monotonically increasing (the in-app updater compares semver).
+- Every push to master makes auto-tag create a date tag (`vYYYY.MM.DD.N`, bookkeeping only). **Release builds must be dispatched manually** (`gh workflow run release.yml --ref <tag>`); artifacts land in a draft Release, and publishing the draft is the update distribution gate. Perceivable versions therefore only advance on actual releases — effectively a release counter.
+- CI has a version consistency guard: the 5 static version fields must match each other (internal consistency only — not required to match the latest release); otherwise the PR build fails.
+
 ### Contributing
 
 Issues and Pull Requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.

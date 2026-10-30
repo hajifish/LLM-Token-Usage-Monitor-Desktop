@@ -26,6 +26,22 @@ jobs:
           node-version: 20
           cache: npm
 
+      # 静态版本一致性守卫：5 处版本字段必须互相一致（dev-only 元数据，
+      # 不要求与最新发布一致，见 README「版本号与发版机制」）。
+      # 曾因无守卫导致 package-lock 以 0.1.0 vs 0.2.0 漂移很久无人发现。
+      - name: Check version consistency
+        run: |
+          node -e "
+          const fs=require('fs');
+          const pkg=require('./package.json');
+          const lock=require('./package-lock.json');
+          const conf=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json'));
+          const toml=fs.readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \"(.*)\"/m)[1];
+          const all=[pkg.version, lock.version, lock.packages[''].version, conf.version, toml];
+          if(new Set(all).size!==1){console.error('版本不一致:',all);process.exit(1);}
+          console.log('版本一致:',all[0]);
+          "
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable (pinned 2026-09-03)
         with:

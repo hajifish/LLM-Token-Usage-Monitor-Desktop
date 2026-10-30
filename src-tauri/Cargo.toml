@@ -1,6 +1,6 @@
 [package]
 name = "local-llm-token-usage-monitor"
-version = "0.2.0"
+version = "0.2.18"
 description = "Monitor local LLM token usage across multiple providers"
 authors = ["hajifish"]
 edition = "2021"

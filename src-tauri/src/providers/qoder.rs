@@ -268,7 +268,10 @@ impl QoderProvider {
             .map_err(|e| StepError::Network(e.to_string()))?;
 
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        // 兑换端点对无效/不属于本区域的 PAT 一律 400 BadRequest（实测两个区域一致），
+        // 401/403 见于过期；这里统一按「凭据被拒」处理——触发区域探测，双失败时报
+        // PAT 无效文案而非裸状态码。
+        if matches!(status.as_u16(), 400 | 401 | 403) {
             return Err(StepError::AuthDenied);
         }
         if !status.is_success() {

@@ -50,11 +50,12 @@ GET  {base}/api/v2/user/plan           → plan_tier_name
 read PAT (from api_key)
   → resolve_token: pt- 开头则兑换成 jt；否则原样使用（兼容直接粘贴 jt 的用户）
   → 探测区域:
-       国际: GET quota/usage
-         2xx            → 使用国际
-         401/403/404    → 国内重试
-         其他错误        → 直接报错（不重试，避免把网络故障误判为区域问题）
-       国内: 同上；401/403 → "Qoder PAT 无效或已过期"
+       国际: 兑换 + GET quota/usage
+         2xx                        → 使用国际
+         兑换 400/401/403（实测无效/异区域 PAT 返回 400 BadRequest）→ 国内重试
+         查询 401/403/404           → 国内重试
+         其他错误                    → 直接报错（不重试，避免把网络故障误判为区域问题）
+       国内: 同上；凭据仍被拒 → "Qoder PAT 无效或已过期"
   → 解析 quota/usage
   → GET user/plan（失败忽略，plan_label 缺省 "Qoder"）
 ```

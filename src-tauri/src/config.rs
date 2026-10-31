@@ -592,6 +592,28 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    /// 自动检查更新开关随加密信封 roundtrip 不丢失（托盘「自动检查更新」开关
+    /// 的持久化依赖此行为），两个取反方向都要保真。
+    #[test]
+    fn auto_check_update_survives_save_load_roundtrip() {
+        let path = unique_temp_path("auto-check-roundtrip");
+        let mut cfg = sample_config();
+        cfg.auto_check_update = false;
+        save_to_path(&path, &cfg, false).unwrap();
+
+        let (mut loaded, health) = load_from_path(&path);
+        assert!(!health.unreadable);
+        assert!(!loaded.auto_check_update, "关闭状态应原样落盘并读回");
+
+        loaded.auto_check_update = true;
+        save_to_path(&path, &loaded, false).unwrap();
+        let (reloaded, health2) = load_from_path(&path);
+        assert!(!health2.unreadable);
+        assert!(reloaded.auto_check_update, "重新开启状态应同样保真");
+
+        let _ = fs::remove_file(&path);
+    }
+
     /// 构造一个「必然无法解密」的信封内容（密文首字节被篡改）。
     fn corrupt_envelope_json() -> String {
         let mut envelope = secrets::encrypt("payload").expect("测试环境应能加密");

@@ -435,6 +435,8 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "quit" => app.exit(0),
             "check-update" => crate::updater::on_tray_click(app),
+            // 「自动检查更新」开关：取反并持久化（勾选标记在 toggle 内同步）
+            "auto-check-update" => crate::scheduler::toggle_auto_check_update(app),
             id if id.starts_with("interval_") => {
                 // 托盘「刷新间隔」预设档直选：持久化并唤醒调度器立即生效
                 if let Ok(secs) = id.trim_start_matches("interval_").parse::<u64>() {

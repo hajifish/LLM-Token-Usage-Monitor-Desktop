@@ -297,6 +297,8 @@ fn pending_len(app: &AppHandle) -> u64 {
 }
 
 /// 启动自动检查循环：启动 60 秒后首查，此后每小时一次；开关关闭时跳过。
+/// 开关每个 tick 都重读（托盘「自动检查更新」开关持久化后），
+/// 改动最长延迟一个检查周期生效，无需重启或额外唤醒。
 pub fn spawn_auto_check(app: AppHandle, config: Arc<AsyncRwLock<AppConfig>>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK_DELAY).await;

@@ -279,6 +279,44 @@ pub fn set_refresh_interval(app: &AppHandle, secs: u64) {
     });
 }
 
+/// 托盘菜单点击「自动检查更新」：取反当前配置并持久化（写法同 set_refresh_interval）。
+/// 勾选标记随后同步为配置新值；持久化失败时内存配置未变，唤醒一次轮询，
+/// fast path 会把勾选标记原地同步回真实配置（可见回弹）。
+/// 生效时机：自动检查循环每个 tick 重读该开关（updater::spawn_auto_check），
+/// 改动最长延迟一个检查周期生效，无需额外唤醒。
+pub fn toggle_auto_check_update(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let (Some(config_state), Some(health_state)) = (
+            app.try_state::<Arc<RwLock<AppConfig>>>(),
+            app.try_state::<Arc<RwLock<ConfigHealth>>>(),
+        ) {
+            let mut new_config = config_state.read().await.clone();
+            new_config.auto_check_update = !new_config.auto_check_update;
+            let enabled = new_config.auto_check_update;
+            if let Err(e) =
+                crate::commands::persist_config(&app, &config_state, &health_state, new_config)
+                    .await
+            {
+                log::error!("Failed to set auto check update: {}", e);
+                // 唤醒轮询让勾选标记回弹到真实配置，与 set_refresh_interval 失败路径一致
+                if let Some(notify) = app.try_state::<Arc<Notify>>() {
+                    notify.notify_one();
+                }
+                return;
+            }
+            // 直接把勾选标记置为已持久化的新值，不等下一次轮询原地同步
+            if let Some(state) = app.try_state::<TrayMenuState>() {
+                let inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(item) = inner.as_ref().and_then(|h| h.auto_check_item.as_ref()) {
+                    let _ = item.set_checked(enabled);
+                }
+            }
+            log::info!("自动检查更新已切换为 {}", enabled);
+        }
+    });
+}
+
 /// 托盘菜单条目句柄。菜单只构建一次，数据轮询仅原地 set_text 改写文案，
 /// 不再 set_menu 整体替换菜单对象 —— 替换与用户菜单交互并发时 AppKit
 /// 会在动作分发中 panic（06337ea 对「检查更新」条目已用同一模式修复，
@@ -299,6 +337,7 @@ struct TrayMenuHandles {
     provider_blocks: Vec<ProviderMenuHandles>,
     time_item: Option<MenuItem<Wry>>,
     interval_items: Vec<(u64, CheckMenuItem<Wry>)>,
+    auto_check_item: Option<CheckMenuItem<Wry>>,
     signature: String,
 }
 
@@ -567,6 +606,10 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                     for (secs, item) in &handles.interval_items {
                         let _ = item.set_checked(*secs == tray_config.refresh_interval);
                     }
+                    // 同步自动检查更新勾选标记（配置可能被托盘点击或其他途径改动）
+                    if let Some(item) = &handles.auto_check_item {
+                        let _ = item.set_checked(tray_config.auto_check_update);
+                    }
                     return;
                 }
             }
@@ -707,6 +750,22 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             critical_ok &= menu.append(&update_item).is_ok();
         }
 
+        // 5.6) 自动检查更新开关（紧跟「检查更新」条目）：勾选态 = 配置当前值；
+        //      点击经 toggle_auto_check_update 取反并持久化，后台循环每个 tick 重读
+        //      该开关（改动最长延迟一个检查周期生效），勾选标记也随下一次轮询原地同步
+        let mut auto_check_item = None;
+        if let Ok(item) = CheckMenuItem::with_id(
+            app_handle,
+            "auto-check-update",
+            "自动检查更新",
+            true,
+            tray_config.auto_check_update,
+            None::<&str>,
+        ) {
+            let _ = menu.append(&item);
+            auto_check_item = Some(item);
+        }
+
         // 6) 分隔线 → 退出（主窗口头部已有设置入口，托盘不再重复）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;
@@ -728,6 +787,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 provider_blocks,
                 time_item: time_item_handle,
                 interval_items,
+                auto_check_item,
                 signature,
             };
             match app_handle.try_state::<TrayMenuState>() {

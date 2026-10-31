@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppConfig, ConfigHealth, ProviderConfig } from '../types';
@@ -136,27 +136,37 @@ function Settings({ onBack }: SettingsProps) {
 
   /** 状态栏显示区块的开关即时生效：读最新配置 → 仅改本区块字段 → 落盘。
    *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
-   *  读改写期间忽略重复触发，避免连点丢失更新。 */
-  const traySavingRef = useRef(false);
+   *  在途期间 checkbox 置 disabled（可见、可预期），不静默丢弃点击。 */
+  const [trayBusy, setTrayBusy] = useState(false);
+  /** 与后端 provider_show_in_tray 同语义的匹配键：name + trim 后 alias（空回退 name）。 */
+  const providerKey = (p: ProviderConfig) => {
+    const a = (p.alias || '').trim();
+    return `${p.name}|${a === '' ? p.name : a}`;
+  };
   const applyTrayDisplay = async (
     patch: { master?: boolean; providerIndex?: number; providerName?: string; value: boolean },
   ) => {
-    if (traySavingRef.current) return;
-    traySavingRef.current = true;
+    setTrayBusy(true);
     try {
       const fresh = await invoke<AppConfig>('get_config');
       if (patch.master !== undefined) {
         fresh.tray_text_enabled = patch.master;
       }
       if (patch.providerIndex !== undefined) {
-        const fp = fresh.providers[patch.providerIndex];
-        // 以类型名核对本地索引与后端配置的对应关系，错位时跳过（保守不写错对象）
-        if (fp && fp.name === patch.providerName) {
-          fp.show_in_tray = patch.value;
+        const local = config?.providers[patch.providerIndex];
+        if (!local) return;
+        // 按 name + trim 后 alias 在 fresh 中唯一定位目标（同类型双账号不错位）；
+        // 无法唯一对齐说明配置已被外部改动，保守不写、提示重开设置页
+        const key = providerKey(local);
+        const targets = fresh.providers.filter((fp) => providerKey(fp) === key);
+        if (targets.length !== 1) {
+          setMessage('配置已变化，请重新打开设置页');
+          return;
         }
+        targets[0].show_in_tray = patch.value;
       }
       await invoke('save_config', { newConfig: fresh });
-      // 同步本页表单状态：只动本区块字段，保留其他未保存编辑
+      // 仅在后端写入成功后才同步本页表单状态：只动本区块字段，保留其他未保存编辑
       setConfig((cur) => {
         if (!cur) return cur;
         const providers = cur.providers.map((p, i) =>
@@ -169,9 +179,12 @@ function Settings({ onBack }: SettingsProps) {
         };
       });
     } catch (e) {
-      console.error(e);
+      // 失败不静默：走与 handleSave 同一 toast 通道；本地状态不翻转，
+      // 强制刷新以让受控 checkbox 回弹到真实值
+      setMessage(`状态栏设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
     } finally {
-      traySavingRef.current = false;
+      setTrayBusy(false);
     }
   };
 
@@ -222,7 +235,16 @@ function Settings({ onBack }: SettingsProps) {
     setSaving(true);
     setMessage('');
     try {
-      await invoke('save_config', { newConfig: config });
+      // 本页不拥有的字段（refresh_interval / auto_check_update 已无其 UI，归托盘菜单与
+      // 更新逻辑所有）落盘前从最新配置取回，避免用挂载时快照整份写回而静默回滚托盘改动；
+      // providers / tray 字段仍以页面状态为准
+      const fresh = await invoke<AppConfig>('get_config');
+      const merged: AppConfig = {
+        ...config,
+        refresh_interval: fresh.refresh_interval,
+        auto_check_update: fresh.auto_check_update,
+      };
+      await invoke('save_config', { newConfig: merged });
       setMessage('保存成功');
       // 保存可能触发「覆盖前备份」，重新拉取健康状态以展示备份文件名
       refreshHealth();
@@ -318,6 +340,7 @@ function Settings({ onBack }: SettingsProps) {
                 <input
                   type="checkbox"
                   checked={config.tray_text_enabled}
+                  disabled={trayBusy}
                   onChange={(e) =>
                     applyTrayDisplay({ master: e.target.checked, value: e.target.checked })
                   }
@@ -334,6 +357,7 @@ function Settings({ onBack }: SettingsProps) {
                       <input
                         type="checkbox"
                         checked={p.show_in_tray}
+                        disabled={trayBusy}
                         onChange={(e) =>
                           applyTrayDisplay({
                             providerIndex: i,

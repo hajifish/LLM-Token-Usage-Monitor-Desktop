@@ -2,13 +2,12 @@ import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppConfig, ConfigHealth, ProviderConfig } from '../types';
-import { useUpdate } from '../hooks/useUpdate';
-import { UpdateActions, UpdateProgress } from './UpdateNotice';
 
 interface SettingsProps {
   onBack: () => void;
 }
 
+// 新增类型时同步 providers/mod.rs::ALL_PROVIDER_TYPES 与 tray.rs::tray_short_code
 const PROVIDER_OPTIONS = [
   { value: 'OpenAI', label: 'OpenAI' },
   { value: 'Codex', label: 'Codex (ChatGPT)' },
@@ -22,15 +21,6 @@ const PROVIDER_OPTIONS = [
 
 /** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
 const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code']);
-
-/** 刷新间隔预设选项：秒数 → 显示文案。 */
-const REFRESH_OPTIONS: { value: number; label: string }[] = [
-  { value: 30, label: '30秒' },
-  { value: 60, label: '1分钟' },
-  { value: 120, label: '2分钟' },
-  { value: 300, label: '5分钟' },
-  { value: 600, label: '10分钟' },
-];
 
 /** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
 const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';
@@ -112,17 +102,10 @@ function Settings({ onBack }: SettingsProps) {
   const [message, setMessage] = useState('');
   /** 正在确认删除的供应商索引；null 表示未在确认中 */
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
-  const update = useUpdate();
 
   /** 刷新健康状态（保存后重新拉取，以便展示备份文件名）。 */
   const refreshHealth = () =>
     invoke<ConfigHealth>('get_config_health').then(setHealth).catch(console.error);
-
-  /**
-   * 重新拉取配置。「忽略版本」由后端直接落盘，本页的 config 快照会因此过期，
-   * 若之后点「保存」会把过期的忽略记录写回去，因此操作后必须重新拉取。
-   */
-  const refreshConfig = () => invoke<AppConfig>('get_config').then(setConfig).catch(console.error);
 
   useEffect(() => {
     let alive = true;
@@ -152,6 +135,63 @@ function Settings({ onBack }: SettingsProps) {
 
   const dismiss = (key: string) => setDismissed((d) => ({ ...d, [key]: true }));
 
+  /** 状态栏显示区块的开关即时生效：读最新配置 → 仅改本区块字段 → 落盘。
+   *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
+   *  在途期间 checkbox 置 disabled（可见、可预期），不静默丢弃点击。 */
+  const [trayBusy, setTrayBusy] = useState(false);
+  /** 与后端 provider_show_in_tray 同语义的匹配键：name + trim 后 alias（空回退 name）。 */
+  const providerKey = (p: ProviderConfig) => {
+    const a = (p.alias || '').trim();
+    return `${p.name}|${a === '' ? p.name : a}`;
+  };
+  const applyTrayDisplay = async (patch: {
+    master?: boolean;
+    providerIndex?: number;
+    providerName?: string;
+    value: boolean;
+  }) => {
+    setTrayBusy(true);
+    try {
+      const fresh = await invoke<AppConfig>('get_config');
+      if (patch.master !== undefined) {
+        fresh.tray_text_enabled = patch.master;
+      }
+      if (patch.providerIndex !== undefined) {
+        const local = config?.providers[patch.providerIndex];
+        if (!local) return;
+        // 按 name + trim 后 alias 在 fresh 中唯一定位目标（同类型双账号不错位）；
+        // 无法唯一对齐说明配置已被外部改动，保守不写、提示重开设置页
+        const key = providerKey(local);
+        const targets = fresh.providers.filter((fp) => providerKey(fp) === key);
+        if (targets.length !== 1) {
+          setMessage('配置已变化，请重新打开设置页');
+          return;
+        }
+        targets[0].show_in_tray = patch.value;
+      }
+      await invoke('save_config', { newConfig: fresh });
+      // 仅在后端写入成功后才同步本页表单状态：只动本区块字段，保留其他未保存编辑
+      setConfig((cur) => {
+        if (!cur) return cur;
+        const providers = cur.providers.map((p, i) =>
+          i === patch.providerIndex ? { ...p, show_in_tray: patch.value } : p,
+        );
+        return {
+          ...cur,
+          tray_text_enabled: patch.master ?? cur.tray_text_enabled,
+          providers,
+        };
+      });
+    } catch (e) {
+      // 失败不静默：走与 handleSave 同一 toast 通道；本地状态不翻转，
+      // 强制刷新以让受控 checkbox 回弹到真实值
+      setMessage(`状态栏设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
+    } finally {
+      setTrayBusy(false);
+    }
+  };
+
   const updateProvider = (index: number, field: keyof ProviderConfig, value: string | boolean) => {
     if (!config) return;
     const newProviders = [...config.providers];
@@ -167,7 +207,14 @@ function Settings({ onBack }: SettingsProps) {
       ...config,
       providers: [
         ...config.providers,
-        { name: def.value, api_key: '', enabled: true, platform_token: null, alias: null },
+        {
+          name: def.value,
+          api_key: '',
+          enabled: true,
+          platform_token: null,
+          alias: null,
+          show_in_tray: true,
+        },
       ],
     });
   };
@@ -199,7 +246,16 @@ function Settings({ onBack }: SettingsProps) {
     setSaving(true);
     setMessage('');
     try {
-      await invoke('save_config', { newConfig: config });
+      // 本页不拥有的字段（refresh_interval / auto_check_update 已无其 UI，归托盘菜单与
+      // 更新逻辑所有）落盘前从最新配置取回，避免用挂载时快照整份写回而静默回滚托盘改动；
+      // providers / tray 字段仍以页面状态为准
+      const fresh = await invoke<AppConfig>('get_config');
+      const merged: AppConfig = {
+        ...config,
+        refresh_interval: fresh.refresh_interval,
+        auto_check_update: fresh.auto_check_update,
+      };
+      await invoke('save_config', { newConfig: merged });
       setMessage('保存成功');
       // 保存可能触发「覆盖前备份」，重新拉取健康状态以展示备份文件名
       refreshHealth();
@@ -221,11 +277,10 @@ function Settings({ onBack }: SettingsProps) {
 
   return (
     <div className="settings">
-      <div className="settings-header">
+      <div className="settings-header" data-tauri-drag-region>
         <button className="back-btn" onClick={onBack}>
           ← 返回
         </button>
-        <h2>设置</h2>
         <button className="save-btn-header" onClick={handleSave} disabled={saving}>
           {saving ? '保存中...' : '保存'}
         </button>
@@ -286,24 +341,50 @@ function Settings({ onBack }: SettingsProps) {
           </div>
         )}
 
-        {/* 全局设置 */}
+        {/* 状态栏显示 */}
         <div className="settings-section">
-          <div className="global-settings-row">
-            <img src="/logo-hd.png" alt="Logo" className="global-logo" />
-            <div className="refresh-picker">
-              <span className="refresh-label">刷新间隔</span>
-              <div className="refresh-options">
-                {REFRESH_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className={`refresh-chip ${config.refresh_interval === opt.value ? 'active' : ''}`}
-                    onClick={() => setConfig({ ...config, refresh_interval: opt.value })}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+          <h3>状态栏显示</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">在菜单栏图标旁显示指标文字</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.tray_text_enabled}
+                  disabled={trayBusy}
+                  onChange={(e) =>
+                    applyTrayDisplay({ master: e.target.checked, value: e.target.checked })
+                  }
+                />
+              </label>
             </div>
+            {config.tray_text_enabled && (
+              <div className="tray-provider-list">
+                {config.providers
+                  .map((p, i) => ({ p, i }))
+                  .filter(({ p }) => p.enabled)
+                  .map(({ p, i }) => (
+                    <label key={`${p.name}-${p.alias || i}`} className="tray-provider-row">
+                      <input
+                        type="checkbox"
+                        checked={p.show_in_tray}
+                        disabled={trayBusy}
+                        onChange={(e) =>
+                          applyTrayDisplay({
+                            providerIndex: i,
+                            providerName: p.name,
+                            value: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{p.alias?.trim() || providerLabel(p.name)}</span>
+                    </label>
+                  ))}
+              </div>
+            )}
+            <span className="update-hint">
+              开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
+            </span>
           </div>
         </div>
 
@@ -392,80 +473,6 @@ function Settings({ onBack }: SettingsProps) {
           <button className="add-btn" onClick={addProvider}>
             + 添加服务商
           </button>
-        </div>
-
-        {/* 关于与更新 */}
-        <div className="settings-section">
-          <h3>关于与更新</h3>
-          <div className="update-card">
-            <div className="update-row">
-              <span className="update-row-label">当前版本</span>
-              <span className="update-row-value">v{update.status?.current_version ?? '—'}</span>
-            </div>
-            <div className="update-row">
-              <span className="update-row-label">自动检查更新</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={config.auto_check_update}
-                  onChange={(e) => setConfig({ ...config, auto_check_update: e.target.checked })}
-                />
-              </label>
-            </div>
-            <span className="update-hint">
-              启动 60 秒后首次检查，此后每 24 小时一次；关闭后仍可手动检查。
-            </span>
-
-            {update.status?.phase === 'downloading' && <UpdateProgress status={update.status} />}
-
-            {update.status?.phase === 'available' && (
-              <div className="update-available">
-                <span className="update-row-label">
-                  新版本 v{update.status.version}
-                  {update.status.date && (
-                    <span className="update-date"> · {update.status.date}</span>
-                  )}
-                </span>
-                {update.status.notes && <pre className="update-notes">{update.status.notes}</pre>}
-              </div>
-            )}
-
-            {update.status?.phase === 'ready' && (
-              <span className="update-hint">
-                更新包已下载并通过签名校验。安装会替换当前应用并自动重启，配置与密钥保留在本机；
-                macOS 若提示输入密码，请输入登录密码以完成替换。
-              </span>
-            )}
-
-            <div className="update-actions">
-              {update.status && (
-                <UpdateActions status={update.status} api={update} onSkipChanged={refreshConfig} />
-              )}
-              {config.skipped_update_version && (
-                <button
-                  className="update-btn ghost"
-                  onClick={async () => {
-                    await update.setSkipped(null);
-                    refreshConfig();
-                  }}
-                >
-                  取消忽略 v{config.skipped_update_version}
-                </button>
-              )}
-            </div>
-
-            {update.status && (
-              <span className="update-hint update-status-line">
-                {[
-                  update.status.message,
-                  update.status.last_checked ? `最近检查 ${update.status.last_checked}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-            )}
-            {update.error && <span className="update-error">{update.error}</span>}
-          </div>
         </div>
       </div>
     </div>

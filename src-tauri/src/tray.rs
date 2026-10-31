@@ -1,10 +1,10 @@
-use crate::models::{ProviderStatus, UsageSummary};
+use crate::models::{AppConfig, ProviderStatus, UsageSummary};
 use std::sync::Mutex;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, Wry,
+    AppHandle, Manager, Wry,
 };
 
 /// 托盘中「检查更新」条目的当前句柄。
@@ -95,6 +95,106 @@ pub fn worst_warning(summary: &UsageSummary) -> u8 {
         .unwrap_or(0)
 }
 
+/// 服务商类型的菜单栏短代码（1-2 字母，按用户可读性约定）。
+/// 未收录的类型返回 None，回退到别名前缀截断。
+fn tray_short_code(name: &str) -> Option<&'static str> {
+    match name {
+        "Zhipu" => Some("Z"),
+        "Kimi API" => Some("K"),
+        "Kimi Code" => Some("KC"),
+        "DeepSeek" => Some("DS"),
+        "OpenAI" => Some("OA"),
+        "Codex" => Some("CX"),
+        "Anthropic" => Some("A"),
+        "Claude Code" => Some("CC"),
+        _ => None,
+    }
+}
+
+/// 回退短名（仅未收录类型）：超 8 字符截为 7 字符（去尾部空白）+ …
+fn fallback_short_name(alias: &str) -> String {
+    let count = alias.chars().count();
+    if count <= 8 {
+        return alias.to_string();
+    }
+    let truncated: String = alias.chars().take(7).collect();
+    format!("{}…", truncated.trim_end())
+}
+
+/// 状态栏片段的指标值部分；无数据/出错显示「–」
+fn tray_value(p: &ProviderStatus) -> String {
+    match &p.balance {
+        Some(b) if b.is_percent() => format!("{:.0}%", b.available_balance),
+        Some(b) if b.is_usd() => format!("${:.2}", b.available_balance),
+        Some(b) => format!("¥{:.2}", b.available_balance),
+        None => "–".to_string(),
+    }
+}
+
+/// 该服务商是否需要在状态栏展示：按 name + 回退后的 alias 匹配配置项，
+/// 匹配不到时默认展示（与 serde default 的「新字段默认开」语义一致）。
+/// 两侧 alias 均 trim 后比较：scheduler 的 display_alias 仅过滤纯空白、原样保留其余空白，
+/// 配置 alias 带前后空白时若只 trim 一侧会失配，导致逐服务商开关静默失效。
+fn provider_show_in_tray(config: &AppConfig, p: &ProviderStatus) -> bool {
+    config
+        .providers
+        .iter()
+        .find(|c| {
+            c.name == p.name
+                && c.alias
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|a| !a.is_empty())
+                    .unwrap_or(&c.name)
+                    == p.alias.trim()
+        })
+        .map(|c| c.show_in_tray)
+        .unwrap_or(true)
+}
+
+/// 构建状态栏常显文字；全局关闭或无可展示服务商时返回 None（托盘回退纯图标）。
+/// 展示名 = 类型短码（已收录类型）；同短码的多个账号依次追加序号（DS、DS2）区分。
+pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<String> {
+    if !config.tray_text_enabled {
+        return None;
+    }
+    let visible: Vec<&ProviderStatus> = summary
+        .providers
+        .iter()
+        .filter(|p| p.enabled && provider_show_in_tray(config, p))
+        .collect();
+    if visible.is_empty() {
+        return None;
+    }
+    let mut code_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let parts: Vec<String> = visible
+        .iter()
+        .map(|p| {
+            let base = tray_short_code(&p.name)
+                .map(str::to_string)
+                .unwrap_or_else(|| fallback_short_name(&p.alias));
+            let n = code_counts.entry(base.clone()).or_insert(0);
+            *n += 1;
+            let code = if *n == 1 {
+                base
+            } else {
+                format!("{}{}", base, n)
+            };
+            format!("{} {}", code, tray_value(p))
+        })
+        .collect();
+    Some(parts.join(" · ")).map(|title| {
+        // 文字模式下图标被隐藏（set_icon(None)），红/黄告警打点不可见；
+        // 余量告警触发时在标题前统一加 ⚠️ 前缀（红黄不再区分），避免告警能力回归为死代码
+        if worst_warning(summary) > 0 {
+            format!("⚠️ {}", title)
+        } else {
+            title
+        }
+    })
+}
+
 /// Overlay a colored dot (red/yellow) on the tray icon when any provider is low/empty.
 pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
     let level = worst_warning(summary);
@@ -150,19 +250,9 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
     let update_item = create_update_item(app, "检查更新")?;
-    let settings_item = MenuItem::with_id(app, "settings", "⚙ 设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(
-        app,
-        &[
-            &open_item,
-            &separator1,
-            &update_item,
-            &settings_item,
-            &quit_item,
-        ],
-    )?;
+    let menu = Menu::with_items(app, &[&open_item, &separator1, &update_item, &quit_item])?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
     let icon_path = app
@@ -191,7 +281,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .icon(tray_icon)
         .icon_as_template(false) // 全彩图标，不启用模板模式
         .menu(&menu)
-        .tooltip("LLM Token Monitor")
+        .tooltip("Token Usage")
         .on_tray_icon_event(|tray, _event| {
             // 每次点击托盘图标时触发后台刷新，数据在下次打开菜单时可见。
             // macOS 系统行为：点击菜单项后菜单必然关闭，因此刷新由托盘图标点击触发，
@@ -210,11 +300,10 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "quit" => app.exit(0),
             "check-update" => crate::updater::on_tray_click(app),
-            "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = window.emit("navigate", "settings");
+            id if id.starts_with("interval_") => {
+                // 托盘「刷新间隔」预设档直选：持久化并唤醒调度器立即生效
+                if let Ok(secs) = id.trim_start_matches("interval_").parse::<u64>() {
+                    crate::scheduler::set_refresh_interval(app, secs);
                 }
             }
             _ => {}
@@ -222,4 +311,299 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tray_title_tests {
+    use super::*;
+    use crate::models::{AppConfig, BalanceData, ProviderConfig};
+
+    fn balance(v: f64, currency: &str) -> BalanceData {
+        BalanceData {
+            provider: "test".into(),
+            available_balance: v,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: v,
+            currency: currency.into(),
+        }
+    }
+
+    fn status(alias: &str, balance: Option<BalanceData>, error: Option<String>) -> ProviderStatus {
+        ProviderStatus {
+            name: alias.to_string(),
+            alias: alias.to_string(),
+            enabled: true,
+            balance,
+            usage: None,
+            error,
+            quota_infos: None,
+        }
+    }
+
+    fn pconfig(name: &str, alias: Option<&str>, show_in_tray: bool) -> ProviderConfig {
+        ProviderConfig {
+            name: name.to_string(),
+            api_key: String::new(),
+            enabled: true,
+            platform_token: None,
+            alias: alias.map(Into::into),
+            show_in_tray,
+        }
+    }
+
+    fn config(providers: Vec<ProviderConfig>) -> AppConfig {
+        AppConfig {
+            providers,
+            refresh_interval: 60,
+            auto_check_update: true,
+            tray_text_enabled: true,
+        }
+    }
+
+    #[test]
+    fn title_none_when_global_disabled() {
+        let mut cfg = config(vec![]);
+        cfg.tray_text_enabled = false;
+        let s = UsageSummary {
+            providers: vec![status("智谱", Some(balance(70.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&cfg, &s), None);
+    }
+
+    #[test]
+    fn title_none_when_no_visible_providers() {
+        assert_eq!(
+            build_tray_title(&config(vec![]), &UsageSummary::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn title_joins_mixed_segments_with_separator() {
+        let s = UsageSummary {
+            providers: vec![
+                status("智谱", Some(balance(70.0, "%")), None),
+                status("DeepSeek", Some(balance(88.88, "CNY")), None),
+                status("OpenAI", Some(balance(12.34, "USD")), None),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "智谱 70% · DS ¥88.88 · OA $12.34"
+        );
+    }
+
+    #[test]
+    fn percent_value_formats_as_integer() {
+        let s = UsageSummary {
+            providers: vec![status("智谱", Some(balance(70.4, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "智谱 70%");
+    }
+
+    #[test]
+    fn error_segment_shows_dash() {
+        let s = UsageSummary {
+            providers: vec![status("Kimi", None, Some("timeout".into()))],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "Kimi –");
+    }
+
+    #[test]
+    fn no_data_segment_shows_dash() {
+        let s = UsageSummary {
+            providers: vec![status("Unknown", None, None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "Unknown –");
+    }
+
+    #[test]
+    fn disabled_provider_excluded() {
+        let mut p = status("智谱", Some(balance(70.0, "%")), None);
+        p.enabled = false;
+        let s = UsageSummary {
+            providers: vec![p],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s), None);
+    }
+
+    #[test]
+    fn show_in_tray_false_excluded() {
+        let cfg = config(vec![pconfig("智谱", None, false)]);
+        let s = UsageSummary {
+            providers: vec![status("智谱", Some(balance(70.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&cfg, &s), None);
+    }
+
+    #[test]
+    fn same_name_accounts_matched_by_alias() {
+        // 同类型两个账号，仅关闭其中一个；展示名用类型短码，alias 不再进菜单栏
+        let cfg = config(vec![
+            pconfig("DeepSeek", Some("工作号"), true),
+            pconfig("DeepSeek", Some("私人号"), false),
+        ]);
+        // 调度器实际输出中 name 为服务商类型名（provider.name()），alias 才是账号别名
+        let mut work = status("工作号", Some(balance(88.0, "CNY")), None);
+        work.name = "DeepSeek".into();
+        let mut home = status("私人号", Some(balance(5.0, "CNY")), None);
+        home.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![work, home],
+            ..Default::default()
+        };
+        // 私人号 ¥5 触发黄档告警（worst_warning 覆盖全部供应商，与图标打点同语义）→ 标题加 ⚠️
+        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "⚠️ DS ¥88.00");
+    }
+
+    #[test]
+    fn duplicate_visible_accounts_get_index_suffix() {
+        // 同类型两个账号同时展示：第二个起追加序号区分（DS、DS2）
+        let mut a = status("工作号", Some(balance(88.0, "CNY")), None);
+        a.name = "DeepSeek".into();
+        let mut b = status("私人号", Some(balance(5.0, "CNY")), None);
+        b.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![a, b],
+            ..Default::default()
+        };
+        // ¥5 黄档告警 → 标题加 ⚠️ 前缀
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "⚠️ DS ¥88.00 · DS2 ¥5.00"
+        );
+    }
+
+    #[test]
+    fn provider_types_map_to_short_codes() {
+        // 8 种内置类型的短码映射
+        let cases = [
+            ("Zhipu", "Z"),
+            ("Kimi API", "K"),
+            ("Kimi Code", "KC"),
+            ("DeepSeek", "DS"),
+            ("OpenAI", "OA"),
+            ("Codex", "CX"),
+            ("Anthropic", "A"),
+            ("Claude Code", "CC"),
+        ];
+        for (name, code) in cases {
+            let mut p = status(name, Some(balance(70.0, "%")), None);
+            p.name = name.into();
+            let s = UsageSummary {
+                providers: vec![p],
+                ..Default::default()
+            };
+            assert_eq!(
+                build_tray_title(&config(vec![]), &s).unwrap(),
+                format!("{} 70%", code),
+                "类型 {} 应映射为短码 {}",
+                name,
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn known_type_uses_short_code_even_if_long() {
+        // "Claude Code" 是已收录类型 → 用短码 CC，不走截断
+        let s = UsageSummary {
+            providers: vec![status("Claude Code", Some(balance(70.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "CC 70%");
+    }
+
+    #[test]
+    fn fallback_long_unknown_name_truncated() {
+        // 未收录类型回退到别名截断：超 8 字符截前 7 字符 + …
+        let s = UsageSummary {
+            providers: vec![status(
+                "SomeUnknownProvider",
+                Some(balance(70.0, "%")),
+                None,
+            )],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "SomeUnk… 70%"
+        );
+    }
+
+    #[test]
+    fn cjk_multibyte_long_alias_truncated_by_char_count() {
+        // "智谱清言助手测试版" 共 9 个汉字 > 8 → 按字符数截前 7 字 + …
+        let s = UsageSummary {
+            providers: vec![status("智谱清言助手测试版", Some(balance(70.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "智谱清言助手测… 70%"
+        );
+    }
+
+    #[test]
+    fn warning_prefix_shown_when_level_one() {
+        // 余量告警（黄）：文字模式下标题加 ⚠️ 前缀（红黄不再区分，统一警示符）
+        let s = UsageSummary {
+            providers: vec![status("智谱", Some(balance(3.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "⚠️ 智谱 3%");
+    }
+
+    #[test]
+    fn warning_prefix_shown_when_level_two() {
+        // 余量耗尽（红）：同样加 ⚠️ 前缀
+        let s = UsageSummary {
+            providers: vec![status("DeepSeek", Some(balance(0.0, "CNY")), None)],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "⚠️ DS ¥0.00"
+        );
+    }
+
+    #[test]
+    fn no_warning_prefix_when_level_zero() {
+        let s = UsageSummary {
+            providers: vec![status("DeepSeek", Some(balance(88.88, "CNY")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "DS ¥88.88");
+    }
+
+    #[test]
+    fn every_builtin_provider_type_has_short_code() {
+        // ALL_PROVIDER_TYPES 是类型清单单一事实源：每个内置类型都必须有短码，
+        // 否则菜单栏回退到别名截断，展示退化
+        for t in crate::providers::ALL_PROVIDER_TYPES {
+            assert!(tray_short_code(t).is_some(), "类型 {} 缺少短码", t);
+        }
+    }
+
+    #[test]
+    fn alias_with_surrounding_whitespace_still_respects_show_in_tray() {
+        // 配置 alias 带前后空白：scheduler 原样保留为 display_alias（未 trim），
+        // provider_show_in_tray 必须对两侧都 trim 才能匹配，否则开关静默失效
+        let cfg = config(vec![pconfig("DeepSeek", Some(" 工作号 "), false)]);
+        let mut work = status(" 工作号 ", Some(balance(88.0, "CNY")), None);
+        work.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![work],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&cfg, &s), None);
+    }
 }

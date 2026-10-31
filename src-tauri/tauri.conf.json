@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "Local LLM Token Usage Monitor",
+  "productName": "Token Usage",
   "version": "0.2.18",
   "identifier": "com.hajifish.llm-token-monitor",
   "build": {
@@ -10,11 +10,22 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Local LLM Token Usage Monitor",
-        "width": 800,
-        "height": 600
+        "title": "Token Usage",
+        "width": 780,
+        "height": 540,
+        "resizable": false,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "theme": "Dark",
+        "visible": false,
+        "windowEffects": {
+          "effects": ["hudWindow"],
+          "state": "active"
+        }
       }
     ],
     "security": {

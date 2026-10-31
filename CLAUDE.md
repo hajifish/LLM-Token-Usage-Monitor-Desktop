@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+## 分支与开发流程（原则）
+
+- 本地开发集成分支默认为 **develop**；main/master 为发布线。开发新功能时：先从远端更新 develop 与 main（fetch + fast-forward 到各自最新），再从**最新 develop** 创建 `feature/<名>` 分支开发，不直接在 develop 上堆功能提交。
+- 远端尚无 develop 时，从 master 最新提交创建本地 develop，需要时再推送远端。
+- 新功能沿用现有人工把关流程：设计 spec → 实施计划 → **人工检查与确认后才执行** → 完成后人工验收，再合回 develop。
+
 ## 版本号与发版机制（重要，勿凭直觉操作）
 
 - 静态版本号（package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json）是 **dev-only 元数据**：仅供本地开发构建展示。**不要**把它手工对齐到最新发布版本——真实版本号由 release.yml 构建时按 `v*` tag 总数派生：`0.(2+COUNT/256).(COUNT%256)`，全局只升不降（应用内更新按 semver 比较）。

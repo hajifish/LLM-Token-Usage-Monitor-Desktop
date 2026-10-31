@@ -7,7 +7,9 @@ export type { BalanceData, QuotaInfo, UsageData, ProviderStatus, UsageSummary } 
 
 export function useUsage() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
+  // loading 仅表示首次加载（尚无任何数据）；手动刷新用 refreshing，避免整面板被 loading 替换
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 注意：fetchUsage 内不做同步 setState（首行为即 await），
@@ -24,7 +26,7 @@ export function useUsage() {
   }, []);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     setError(null);
     try {
       // 先注册一次性事件监听，确保不遗漏后端发出的 usage-updated
@@ -49,6 +51,8 @@ export function useUsage() {
       await fetchUsage(); // 最终确认
     } catch {
       await fetchUsage();
+    } finally {
+      setRefreshing(false);
     }
   }, [fetchUsage]);
 
@@ -79,5 +83,5 @@ export function useUsage() {
     };
   }, []);
 
-  return { summary, loading, error, refresh };
+  return { summary, loading, refreshing, error, refresh };
 }

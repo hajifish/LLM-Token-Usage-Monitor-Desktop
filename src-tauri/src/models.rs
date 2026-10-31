@@ -45,21 +45,32 @@ pub struct ProviderConfig {
     /// 用户自定义别名（用于区分同一服务商的多个账号）；为空时回退到 name
     #[serde(default)]
     pub alias: Option<String>,
+    /// 状态栏常显开关：是否在菜单栏托盘文字中展示该服务商的主指标
+    #[serde(default = "default_show_in_tray")]
+    pub show_in_tray: bool,
+}
+
+fn default_show_in_tray() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub providers: Vec<ProviderConfig>,
     pub refresh_interval: u64,
-    /// 是否自动检查更新（启动 60 秒后首查，之后每 24 小时一次）
+    /// 是否自动检查更新（启动 60 秒后首查，之后每小时一次）
     #[serde(default = "default_auto_check_update")]
     pub auto_check_update: bool,
-    /// 用户「忽略此版本」记录的新版本号；仅对完全相同的版本号生效
-    #[serde(default)]
-    pub skipped_update_version: Option<String>,
+    /// 托盘文字总开关：关闭后菜单栏仅显示图标
+    #[serde(default = "default_tray_text_enabled")]
+    pub tray_text_enabled: bool,
 }
 
 fn default_auto_check_update() -> bool {
+    true
+}
+
+fn default_tray_text_enabled() -> bool {
     true
 }
 
@@ -69,7 +80,7 @@ impl Default for AppConfig {
             providers: Vec::new(),
             refresh_interval: 60,
             auto_check_update: default_auto_check_update(),
-            skipped_update_version: None,
+            tray_text_enabled: default_tray_text_enabled(),
         }
     }
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
@@ -9,7 +10,12 @@ import { useUsage } from './hooks/useUsage';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
-  const { summary, loading, error, refresh } = useUsage();
+  const { summary, loading, refreshing, error, refresh } = useUsage();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(console.error);
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<string>('navigate', (event) => {
@@ -29,18 +35,24 @@ function App() {
       <div className="app">
         {view === 'usage' ? (
           <div className="usage-view">
-            <div className="app-header">
+            <div className="app-header" data-tauri-drag-region>
               <h1 className="app-title">
                 <span className="app-title-logo-wrap">
                   <img src="/tray-logo.png" alt="" className="app-title-logo" />
                 </span>
-                用量
+                <span className="app-title-wordmark">
+                  Token<span className="wordmark-accent">Usage</span>
+                </span>
               </h1>
               <div className="header-actions">
                 {summary?.last_updated && (
                   <span className="header-time">{summary.last_updated}</span>
                 )}
-                <button className="header-refresh-btn" onClick={refresh} title="刷新数据">
+                <button
+                  className={`header-refresh-btn${refreshing ? ' is-refreshing' : ''}`}
+                  onClick={refresh}
+                  title="刷新数据"
+                >
                   <svg
                     width="14"
                     height="14"
@@ -78,11 +90,18 @@ function App() {
               </div>
             </div>
             <UpdateNotice />
-            <UsagePanel summary={summary} loading={loading} error={error} refresh={refresh} />
+            <UsagePanel
+              summary={summary}
+              loading={loading}
+              refreshing={refreshing}
+              error={error}
+              refresh={refresh}
+            />
           </div>
         ) : (
           <Settings onBack={() => setView('usage')} />
         )}
+        {appVersion && <div className="version-tag">v{appVersion}</div>}
       </div>
     </ErrorBoundary>
   );

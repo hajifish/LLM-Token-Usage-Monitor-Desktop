@@ -1,9 +1,10 @@
+use crate::config::ConfigHealth;
 use crate::models::{AppConfig, BalanceData, ProviderStatus, UsageSummary};
 use crate::providers;
 use std::sync::Arc;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
-    AppHandle, Emitter,
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    AppHandle, Emitter, Manager, Wry,
 };
 use tokio::sync::{Notify, RwLock};
 use tokio::time::Duration;
@@ -62,6 +63,104 @@ fn format_provider_line(p: &ProviderStatus) -> String {
     } else {
         format!("{} {}  无数据", dot, p.alias)
     }
+}
+
+/// 供应商列表签名：name|alias 序列。签名不变时托盘菜单只原地改写文案。
+fn provider_signature(summary: &UsageSummary) -> String {
+    summary
+        .providers
+        .iter()
+        .map(|p| format!("{}|{}", p.name, p.alias))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+/// 「更新于 HH:MM」展示文案（取 last_updated 的时:分部分，去掉秒）。
+fn update_time_text(summary: &UsageSummary) -> String {
+    summary
+        .last_updated
+        .split(' ')
+        .nth(1)
+        .and_then(|t| {
+            let mut parts = t.split(':');
+            let h = parts.next()?;
+            let m = parts.next()?;
+            Some(format!("{}:{}", h, m))
+        })
+        .unwrap_or_else(|| summary.last_updated.clone())
+}
+
+/// 托盘「刷新间隔」预设档（最短 1 分钟，避免请求过频）。
+const REFRESH_INTERVAL_OPTIONS: &[u64] = &[60, 120, 180, 300, 600, 1800, 3600, 21600];
+
+/// Provider Drop 卸载到阻塞线程池的并发上限（OnceLock 初始化的模块级信号量）。
+/// 超限说明阻塞线程池已被连接池收敛长时间占满，再排队只会堆积任务。
+static DROP_SEMAPHORE: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::OnceLock::new();
+
+fn drop_semaphore() -> Arc<tokio::sync::Semaphore> {
+    DROP_SEMAPHORE
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(16)))
+        .clone()
+}
+
+/// 刷新间隔档位的菜单文案。
+fn interval_label(secs: u64) -> String {
+    match secs {
+        60 => "1 分钟".to_string(),
+        120 => "2 分钟".to_string(),
+        180 => "3 分钟".to_string(),
+        300 => "5 分钟".to_string(),
+        600 => "10 分钟".to_string(),
+        1800 => "30 分钟".to_string(),
+        3600 => "1 小时".to_string(),
+        21600 => "6 小时".to_string(),
+        other => format!("{} 秒", other),
+    }
+}
+
+/// 托盘菜单点击「刷新间隔」档位：持久化到配置并唤醒调度器立即生效。
+/// 勾选标记由下一次 update_tray_menu 原地同步（配置变更会立即触发轮询）。
+pub fn set_refresh_interval(app: &AppHandle, secs: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let (Some(config_state), Some(health_state), Some(notify)) = (
+            app.try_state::<Arc<RwLock<AppConfig>>>(),
+            app.try_state::<Arc<RwLock<ConfigHealth>>>(),
+            app.try_state::<Arc<Notify>>(),
+        ) {
+            let mut new_config = config_state.read().await.clone();
+            new_config.refresh_interval = secs;
+            if let Err(e) =
+                crate::commands::persist_config(&app, &config_state, &health_state, new_config)
+                    .await
+            {
+                log::error!("Failed to set refresh interval: {}", e);
+                // 持久化失败时勾选标记仍停在用户点的档位上，与真实配置脱节；
+                // 唤醒一次轮询，fast path 会把勾选标记原地同步回真实配置（可见回弹）
+                notify.notify_one();
+            }
+            log::info!("刷新间隔已设置为 {} 秒", secs);
+            notify.notify_one();
+        }
+    });
+}
+
+/// 托盘菜单条目句柄。菜单只构建一次，数据轮询仅原地 set_text 改写文案，
+/// 不再 set_menu 整体替换菜单对象 —— 替换与用户菜单交互并发时 AppKit
+/// 会在动作分发中 panic（06337ea 对「检查更新」条目已用同一模式修复，
+/// 本结构把该模式推广到数据轮询的供应商条目与时间条目）。
+#[derive(Default)]
+pub struct TrayMenuState {
+    inner: std::sync::Mutex<Option<TrayMenuHandles>>,
+}
+
+#[derive(Default)]
+struct TrayMenuHandles {
+    provider_items: Vec<MenuItem<Wry>>,
+    time_item: Option<MenuItem<Wry>>,
+    interval_items: Vec<(u64, CheckMenuItem<Wry>)>,
+    signature: String,
 }
 
 pub struct Scheduler {
@@ -197,6 +296,25 @@ async fn poll_providers(
                     });
                 }
             }
+            // reqwest 异步 Client 的 Drop 会等待连接池收敛，在代理/热点等
+            // 连接僵死的环境下可能无限阻塞（采样证实卡在 ClientRef::drop_slow
+            // 的 Condvar 上），且 Drop 不受请求超时保护。卸载到阻塞线程池执行，
+            // 调度任务与后续轮询不受池收敛速度影响。信号量限制在途 Drop 数量，
+            // 防止僵死 Drop 堆积耗尽线程池、饿死其他 spawn_blocking 任务。
+            match drop_semaphore().try_acquire_owned() {
+                Ok(permit) => {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        drop(provider);
+                        drop(permit);
+                    });
+                }
+                Err(_) => {
+                    // 排队超限：泄漏一个连接池（进程生命周期内不再收敛），
+                    // 保全阻塞线程池供更新安装等关键路径使用——泄漏优于饿死
+                    log::warn!("Provider Drop 排队超限，泄漏一个 HTTP 连接池以保全线程池");
+                    std::mem::forget(provider);
+                }
+            }
         }
     }
 
@@ -212,20 +330,43 @@ async fn poll_providers(
         *s = summary.clone();
     }
 
-    // 更新托盘菜单和 tooltip
-    update_tray_menu(app_handle, &summary);
-
-    // 更新托盘图标警告打点（余量不足时显示红/黄点）
-    crate::tray::update_tray_badge(app_handle, &summary);
+    // 更新托盘菜单、tooltip、图标/文字展示与告警打点
+    update_tray_menu(app_handle, &summary).await;
 
     // 推送给前端
     let _ = app_handle.emit("usage-updated", &summary);
 }
 
-fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
+async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
     if let Some(tray) = app_handle.tray_by_id("main_tray") {
+        // --- 状态栏常显文字（菜单栏图标旁的主指标摘要） ---
+        let tray_config = match app_handle.try_state::<Arc<RwLock<AppConfig>>>() {
+            Some(state) => state.read().await.clone(),
+            None => {
+                // 正常启动后必有该状态；走到这里说明时序异常（如状态尚未 manage），
+                // 留痕便于排查，不再完全静默
+                log::warn!("TrayMenuState: 未找到 AppConfig 状态，回退默认配置");
+                AppConfig::default()
+            }
+        };
+        // 有供应商上状态栏时：只显示文字、隐藏软件 logo；没有任何供应商展示时：
+        // 只显示软件 logo（带告警打点）、不显示文字，避免菜单栏重复占用
+        let title = crate::tray::build_tray_title(&tray_config, summary);
+        match title.as_deref() {
+            Some(t) => {
+                let _ = tray.set_title(Some(t));
+                let _ = tray.set_icon(None);
+            }
+            None => {
+                // 注意：tray-icon 的 set_title(None) 是静默无操作（不会清空按钮
+                // 标题），必须传空字符串才能真正清掉旧文字
+                let _ = tray.set_title(Some(""));
+                crate::tray::update_tray_badge(app_handle, summary);
+            }
+        }
+
         // --- 构建 tooltip（鼠标悬停提示） ---
-        let mut tooltip_lines = vec!["LLM Token Monitor".to_string()];
+        let mut tooltip_lines = vec!["Token Usage".to_string()];
         for p in &summary.providers {
             if let Some(ref balance) = p.balance {
                 if balance.is_percent() {
@@ -255,7 +396,30 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         tooltip_lines.push(format!("更新: {}", summary.last_updated));
         let _ = tray.set_tooltip(Some(&tooltip_lines.join("\n")));
 
-        // --- 动态构建主菜单（供应商状态内联展开，不再用二级子菜单） ---
+        // --- 菜单：签名未变时仅原地改写条目文案，不重建菜单对象 ---
+        // set_menu 整体替换与用户菜单交互并发会触发 AppKit 闪退
+        // （06337ea 修掉了更新状态触发的重建，数据轮询的重建由本处根治）。
+        let signature = provider_signature(summary);
+        if let Some(state) = app_handle.try_state::<TrayMenuState>() {
+            let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(handles) = inner.as_mut() {
+                if handles.signature == signature {
+                    for (item, p) in handles.provider_items.iter().zip(summary.providers.iter()) {
+                        let _ = item.set_text(format_provider_line(p));
+                    }
+                    if let Some(time_item) = &handles.time_item {
+                        let _ = time_item.set_text(format!("更新于 {}", update_time_text(summary)));
+                    }
+                    // 同步刷新间隔勾选标记（配置可能在设置页被改动）
+                    for (secs, item) in &handles.interval_items {
+                        let _ = item.set_checked(*secs == tray_config.refresh_interval);
+                    }
+                    return;
+                }
+            }
+        }
+
+        // --- 整体重建（首次 / 服务商列表变化才走这里） ---
         let Ok(menu) = Menu::new(app_handle) else {
             return;
         };
@@ -266,6 +430,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
 
         // 1) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
         const MAX_PROVIDER_ITEMS: usize = 50;
+        let mut provider_items = Vec::new();
         for (i, p) in summary
             .providers
             .iter()
@@ -273,6 +438,8 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             .enumerate()
         {
             let text = format_provider_line(p);
+            // 注意：此处 continue 会使 provider_items 与 summary.providers 失去 1:1 对应，
+            // 破坏 fast path 原地 zip 对齐的前提；仅当条目创建失败（极端）才会发生
             if let Ok(item) = MenuItem::with_id(
                 app_handle,
                 format!("detail_{}_{}", i, p.alias),
@@ -281,6 +448,7 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 None::<&str>,
             ) {
                 let _ = menu.append(&item); // 供应商展示项失败可忽略
+                provider_items.push(item);
             }
         }
 
@@ -304,21 +472,37 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         }
 
         // 4) 更新于 HH:MM（disabled 展示项，紧跟供应商状态）
-        let update_time = summary
-            .last_updated
-            .split(' ')
-            .nth(1)
-            .and_then(|t| t.rsplit_once(':'))
-            .map(|(h, m)| format!("{}:{}", h, m))
-            .unwrap_or_else(|| summary.last_updated.clone());
+        let mut time_item_handle = None;
         if let Ok(time_item) = MenuItem::with_id(
             app_handle,
             "update-time",
-            format!("更新于 {}", update_time),
+            format!("更新于 {}", update_time_text(summary)),
             false,
             None::<&str>,
         ) {
             let _ = menu.append(&time_item);
+            time_item_handle = Some(time_item);
+        }
+
+        // 4.5) 刷新间隔子菜单（仿 Traffic Monitor 的预设档直选，勾选当前档；
+        //      点击经 set_refresh_interval 持久化，勾选标记随下一次轮询原地同步）
+        let mut interval_items = Vec::new();
+        if let Ok(submenu) = Submenu::new(app_handle, "刷新间隔", true) {
+            for secs in REFRESH_INTERVAL_OPTIONS {
+                let checked = *secs == tray_config.refresh_interval;
+                if let Ok(item) = CheckMenuItem::with_id(
+                    app_handle,
+                    format!("interval_{}", secs),
+                    interval_label(*secs),
+                    true,
+                    checked,
+                    None::<&str>,
+                ) {
+                    let _ = submenu.append(&item);
+                    interval_items.push((*secs, item));
+                }
+            }
+            let _ = menu.append(&submenu);
         }
 
         // 5) 分隔线 → 打开主页
@@ -346,18 +530,11 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             critical_ok &= menu.append(&update_item).is_ok();
         }
 
-        // 6) 分隔线 → 设置 + 退出（同一分隔区）
+        // 6) 分隔线 → 退出（主窗口头部已有设置入口，托盘不再重复）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;
         };
         critical_ok &= menu.append(&separator2).is_ok();
-
-        let Ok(settings_item) =
-            MenuItem::with_id(app_handle, "settings", "⚙ 设置", true, None::<&str>)
-        else {
-            return;
-        };
-        critical_ok &= menu.append(&settings_item).is_ok();
 
         let Ok(quit_item) =
             MenuItem::with_id(app_handle, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)
@@ -369,6 +546,23 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 仅当关键项全部装配成功才替换菜单，否则保留旧菜单
         if critical_ok {
             let _ = tray.set_menu(Some(menu));
+            // 登记条目句柄：此后数据轮询仅原地改写文案，不再走重建路径
+            let handles = TrayMenuHandles {
+                provider_items,
+                time_item: time_item_handle,
+                interval_items,
+                signature,
+            };
+            match app_handle.try_state::<TrayMenuState>() {
+                Some(state) => {
+                    *state.inner.lock().unwrap_or_else(|e| e.into_inner()) = Some(handles);
+                }
+                None => {
+                    app_handle.manage(TrayMenuState {
+                        inner: std::sync::Mutex::new(Some(handles)),
+                    });
+                }
+            }
         }
     }
     let _ = app_handle;
@@ -378,6 +572,135 @@ fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
 mod tests {
     use super::*;
     use crate::models::{BalanceData, ProviderStatus};
+
+    // ---------- provider_signature ----------
+
+    fn status_with(name: &str, alias: &str) -> ProviderStatus {
+        ProviderStatus {
+            name: name.to_string(),
+            alias: alias.to_string(),
+            enabled: true,
+            balance: None,
+            usage: None,
+            error: None,
+            quota_infos: None,
+        }
+    }
+
+    #[test]
+    fn signature_empty_when_no_providers() {
+        let s = UsageSummary::default();
+        assert_eq!(provider_signature(&s), "");
+    }
+
+    #[test]
+    fn signature_distinguishes_name_and_alias() {
+        let a = UsageSummary {
+            providers: vec![status_with("DeepSeek", "工作号")],
+            ..Default::default()
+        };
+        let b = UsageSummary {
+            providers: vec![status_with("DeepSeek", "私人号")],
+            ..Default::default()
+        };
+        assert_ne!(
+            provider_signature(&a),
+            provider_signature(&b),
+            "同名不同别名应视为不同签名"
+        );
+    }
+
+    #[test]
+    fn signature_changes_with_provider_count() {
+        let one = UsageSummary {
+            providers: vec![status_with("DeepSeek", "DeepSeek")],
+            ..Default::default()
+        };
+        let mut two = one.clone();
+        two.providers.push(status_with("Zhipu", "Zhipu"));
+        assert_ne!(provider_signature(&one), provider_signature(&two));
+    }
+
+    #[test]
+    fn signature_stable_for_same_providers() {
+        let a = UsageSummary {
+            providers: vec![
+                status_with("DeepSeek", "DeepSeek"),
+                status_with("Zhipu", "智谱"),
+            ],
+            ..Default::default()
+        };
+        let b = a.clone();
+        assert_eq!(provider_signature(&a), provider_signature(&b));
+    }
+
+    #[test]
+    fn signature_changes_when_order_differs() {
+        // 原地 zip 对齐不变量：同集合不同顺序必须产生不同签名，
+        // 否则签名命中会让 zip 错位、文案写到别的供应商行上
+        let a = UsageSummary {
+            providers: vec![
+                status_with("DeepSeek", "工作号"),
+                status_with("Zhipu", "智谱"),
+            ],
+            ..Default::default()
+        };
+        let b = UsageSummary {
+            providers: vec![
+                status_with("Zhipu", "智谱"),
+                status_with("DeepSeek", "工作号"),
+            ],
+            ..Default::default()
+        };
+        assert_ne!(provider_signature(&a), provider_signature(&b));
+    }
+
+    // ---------- update_time_text ----------
+
+    #[test]
+    fn update_time_text_extracts_hour_minute() {
+        let s = UsageSummary {
+            last_updated: "2026-10-31 08:00:00".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(update_time_text(&s), "08:00");
+    }
+
+    #[test]
+    fn update_time_text_empty_falls_back_to_raw() {
+        let s = UsageSummary {
+            last_updated: String::new(),
+            ..Default::default()
+        };
+        assert_eq!(update_time_text(&s), "");
+    }
+
+    // ---------- interval_label ----------
+
+    #[test]
+    fn interval_label_maps_all_preset_options() {
+        let cases = [
+            (60, "1 分钟"),
+            (120, "2 分钟"),
+            (180, "3 分钟"),
+            (300, "5 分钟"),
+            (600, "10 分钟"),
+            (1800, "30 分钟"),
+            (3600, "1 小时"),
+            (21600, "6 小时"),
+        ];
+        for (secs, label) in cases {
+            assert_eq!(interval_label(secs), label, "{} 秒档文案应正确", secs);
+        }
+        // 预设档清单与映射表规模一致（8 档全映射）
+        assert_eq!(REFRESH_INTERVAL_OPTIONS.len(), cases.len());
+    }
+
+    #[test]
+    fn interval_label_legacy_30s_falls_back() {
+        // 存量旧配置可能仍存有 30 秒档：回退为「30 秒」而不是 panic
+        assert_eq!(interval_label(30), "30 秒");
+    }
 
     // ---------- progress_bar ----------
 

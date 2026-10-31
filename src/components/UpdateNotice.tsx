@@ -35,34 +35,13 @@ export function UpdateProgress({ status }: { status: UpdateStatus }) {
 type UpdateApi = ReturnType<typeof useUpdate>;
 
 /** 按更新阶段渲染对应的操作按钮。 */
-export function UpdateActions({
-  status,
-  api,
-  onSkipChanged,
-}: {
-  status: UpdateStatus;
-  api: UpdateApi;
-  /** 忽略记录由后端直接落盘，调用方可借此刷新自己的配置快照 */
-  onSkipChanged?: () => void;
-}) {
+export function UpdateActions({ status, api }: { status: UpdateStatus; api: UpdateApi }) {
   switch (status.phase) {
     case 'available':
       return (
-        <>
-          <button className="update-btn primary" onClick={api.download}>
-            下载更新
-          </button>
-          <button
-            className="update-btn"
-            title={`不再提示 v${status.version}`}
-            onClick={async () => {
-              await api.setSkipped(status.version);
-              onSkipChanged?.();
-            }}
-          >
-            忽略此版本
-          </button>
-        </>
+        <button className="update-btn primary" onClick={api.download}>
+          下载更新
+        </button>
       );
     case 'downloading':
       return <span className="update-hint">正在下载，请保持应用运行…</span>;

@@ -64,8 +64,6 @@ export interface AppConfig {
   refresh_interval: number;
   /** 是否自动检查更新（启动后 60 秒首查，之后每 24 小时一次）。 */
   auto_check_update: boolean;
-  /** 用户「忽略此版本」记录的新版本号；出现更新的版本时自动失效。 */
-  skipped_update_version: string | null;
   /** 托盘文字总开关：关闭后菜单栏仅显示图标。 */
   tray_text_enabled: boolean;
 }

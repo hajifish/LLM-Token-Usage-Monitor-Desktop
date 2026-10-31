@@ -6,21 +6,20 @@
 //! - 两段式安装：先下载（`download()` 内部完成 minisign 签名校验），再由用户确认安装并重启；
 //! - 安全边界是 tauri.conf.json 中配置的公钥：签名不匹配的更新包在下载阶段即被拒绝，
 //!   永远到不了安装阶段；
-//! - 「自动检查开关」「忽略此版本」写入 AppConfig，复用 config::save 的加密与备份守卫。
+//! - 「自动检查开关」写入 AppConfig，复用 config::save 的加密与备份守卫。
 
-use crate::config::ConfigHealth;
 use crate::models::AppConfig;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::RwLock as AsyncRwLock;
 
 /// 启动后首次自动检查的延迟（避开启动时的供应商轮询与网络拥塞）。
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(60);
 /// 自动检查周期。
-const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// 下载进度事件的最小发送间隔（高频 IPC 会拖慢下载）。
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -173,13 +172,6 @@ fn now_string() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// 读取配置中的「已忽略版本」。
-async fn skipped_version(app: &AppHandle) -> Option<String> {
-    let state = app.try_state::<Arc<AsyncRwLock<AppConfig>>>()?;
-    let skipped = state.read().await.skipped_update_version.clone();
-    skipped
-}
-
 /// Release 说明：全空白视为无说明。
 fn clean_notes(body: Option<&str>) -> Option<String> {
     body.map(str::trim)
@@ -226,7 +218,6 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
         Ok(updater) => updater.check().await,
         Err(e) => Err(e),
     };
-    let skipped = skipped_version(app).await;
     let now = now_string();
 
     match result {
@@ -240,18 +231,7 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
                         .to_string()
                 })
             });
-            if skipped.as_deref() == Some(version.as_str()) {
-                clear_pending(app);
-                let message = format!("已忽略 v{}", version);
-                mutate_status(app, |s| {
-                    s.phase = UpdatePhase::UpToDate;
-                    s.version = Some(version);
-                    s.notes = notes;
-                    s.date = date;
-                    s.message = Some(message);
-                    s.last_checked = Some(now);
-                });
-            } else if pending_version(app).as_deref() == Some(version.as_str()) {
+            if pending_version(app).as_deref() == Some(version.as_str()) {
                 let len = pending_len(app);
                 mutate_status(app, |s| {
                     s.phase = UpdatePhase::Ready;
@@ -316,7 +296,7 @@ fn pending_len(app: &AppHandle) -> u64 {
         .unwrap_or(0)
 }
 
-/// 启动自动检查循环：启动 60 秒后首查，此后每 24 小时一次；开关关闭时跳过。
+/// 启动自动检查循环：启动 60 秒后首查，此后每小时一次；开关关闭时跳过。
 pub fn spawn_auto_check(app: AppHandle, config: Arc<AsyncRwLock<AppConfig>>) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK_DELAY).await;
@@ -518,43 +498,6 @@ pub async fn install_update(app: AppHandle) -> Result<UpdateStatus, String> {
         Ok(Err(e)) => Ok(fail(&app, user_error_msg(&e))),
         Err(e) => Ok(fail(&app, format!("安装任务异常终止：{}", e))),
     }
-}
-
-/// 记录 / 取消「忽略此版本」。写入 AppConfig 走与保存配置相同的加密与备份守卫。
-#[tauri::command]
-pub async fn set_skipped_update_version(
-    app: AppHandle,
-    config_state: State<'_, Arc<AsyncRwLock<AppConfig>>>,
-    health_state: State<'_, Arc<AsyncRwLock<ConfigHealth>>>,
-    version: Option<String>,
-) -> Result<UpdateStatus, String> {
-    let mut new_config = { config_state.read().await.clone() };
-    new_config.skipped_update_version = version.clone();
-    crate::commands::persist_config(&app, &config_state, &health_state, new_config).await?;
-
-    match version.as_deref() {
-        Some(v) => {
-            log::info!("更新: 已忽略版本 v{}", v);
-            // 被忽略的版本不再保留已下载的更新包
-            if pending_version(&app).as_deref() == Some(v) {
-                clear_pending(&app);
-            }
-        }
-        None => log::info!("更新: 已取消忽略版本"),
-    }
-
-    mutate_status(&app, |s| match version.as_deref() {
-        Some(v) if s.version.as_deref() == Some(v) => {
-            s.phase = UpdatePhase::UpToDate;
-            s.message = Some(format!("已忽略 v{}", v));
-        }
-        None if s.phase == UpdatePhase::UpToDate && s.version.is_some() => {
-            s.phase = UpdatePhase::Available;
-            s.message = None;
-        }
-        _ => {}
-    });
-    Ok(snapshot(&app))
 }
 
 #[cfg(test)]

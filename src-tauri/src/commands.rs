@@ -40,7 +40,7 @@ pub async fn trigger_refresh(notify: tauri::State<'_, Arc<Notify>>) -> Result<()
 
 /// 统一的配置落盘入口：备份守卫 → 加密原子写入 → 写回内存态。
 ///
-/// `save_config` 与 `set_skipped_update_version` 共用，避免两条写入路径的保护逻辑分叉。
+/// `save_config` 与其他直改配置的路径共用，避免写入保护逻辑分叉。
 pub(crate) async fn persist_config(
     app: &AppHandle,
     config_state: &Arc<RwLock<AppConfig>>,

@@ -53,15 +53,5 @@ export function useUpdate() {
     }
   }, []);
 
-  /** 忽略指定版本（传 null 表示取消忽略），返回最新的更新状态。 */
-  const setSkipped = useCallback(async (version: string | null) => {
-    setError(null);
-    try {
-      setStatus(await invoke<UpdateStatus>('set_skipped_update_version', { version }));
-    } catch (e) {
-      setError(String(e));
-    }
-  }, []);
-
-  return { status, error, check, download, install, setSkipped };
+  return { status, error, check, download, install };
 }

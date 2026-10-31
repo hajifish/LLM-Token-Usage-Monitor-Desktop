@@ -83,8 +83,7 @@ pub fn run() {
             updater::get_update_status,
             updater::check_update,
             updater::download_update,
-            updater::install_update,
-            updater::set_skipped_update_version
+            updater::install_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

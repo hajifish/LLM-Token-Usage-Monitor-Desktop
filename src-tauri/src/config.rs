@@ -555,7 +555,6 @@ mod tests {
             ],
             refresh_interval: 120,
             auto_check_update: true,
-            skipped_update_version: None,
             tray_text_enabled: true,
         }
     }

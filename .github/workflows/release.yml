@@ -1,9 +1,13 @@
 name: Release
 
 on:
+  # 发版靠手打 tag 触发：git tag v0.3.0 && git push origin v0.3.0
+  # （手推的 tag 会正常级联触发本工作流；不要再引入用 GITHUB_TOKEN 推 tag 的自动化，
+  #   那样的事件不会触发 workflow）
   push:
     tags:
       - 'v*'
+  # 兜底：tag 推送未能触发时，可手动跑 gh workflow run release.yml --ref <tag>
   workflow_dispatch:
 
 permissions:
@@ -21,9 +25,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
-        with:
-          # 版本号派生需要完整的 tag 历史（git tag -l 计数）
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -42,20 +43,30 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Set version from tag
+      - name: Resolve version from tag
+        id: ver
         shell: bash
         run: |
-          # 版本号必须全局单调递增（应用内更新的 semver 比较只升不降），
-          # 因此不使用日期 tag 直接派生，而是用仓库 v* tag 总数作为 patch：
-          # 0.2.<tag 总数>；超过 255（Windows MSI 每段上限）自动进位 minor。
-          COUNT=$(git tag -l 'v*' | wc -l | tr -d ' ')
-          MINOR=$((2 + COUNT / 256))
-          PATCH=$((COUNT % 256))
-          NEW_VERSION="0.${MINOR}.${PATCH}"
-          echo "Setting version to $NEW_VERSION ($COUNT existing v* tags)"
-          npm version "$NEW_VERSION" --no-git-tag-version || echo "Version already $NEW_VERSION"
-          sed -i.bak "s/^version = .*/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
-          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));c.version='$NEW_VERSION';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(c,null,2)+'\n')"
+          # 版本号直接取 tag（v0.3.0 -> 0.3.0），不再从 tag 数量派生。
+          # 只认 vX.Y.Z：号段必须人工决定，保证全局单调递增
+          # （应用内更新按 semver 比较，只升不降）。
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::发布 tag 必须是 vX.Y.Z 形式，当前为 ${TAG}"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "title=Token Usage ${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Set version in manifests
+        shell: bash
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          npm version "$VERSION" --no-git-tag-version || echo "Version already $VERSION"
+          sed -i.bak "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));c.version='$VERSION';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(c,null,2)+'\n')"
 
       # 构建并直接维护 draft Release：上传各平台安装包、更新签名与 latest.json 静态清单。
       # 只有手动发布（取消 draft）后，releases/latest/download/latest.json 才对外可见，
@@ -68,7 +79,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          releaseName: ${{ steps.ver.outputs.title }}
           releaseDraft: true
           prerelease: false
           # 生成 latest.json（含各平台 URL 与 minisign 签名）
@@ -76,15 +87,40 @@ jobs:
           # 自动更新走 NSIS（per-user 安装，无需 UAC）；MSI 仅作为手动下载选项
           updaterJsonPreferNsis: true
 
-  release-notes:
+  # Tauri 会按 productName 生成 Token.Usage_0.3.0_aarch64.dmg 这类带点的名字，
+  # 这里统一成 TokenUsage-0.3.0-aarch64.dmg，并同步改写 latest.json 里的下载地址
+  # （只改文件名，签名文件内容不动，更新校验不受影响）。
+  normalize:
     needs: release
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
+      - name: Normalize asset names
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          bash scripts/normalize-release-assets.sh "$TAG" "${TAG#v}"
+
+  release-notes:
+    needs: [release, normalize]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release title
+        id: ver
+        run: echo "title=Token Usage ${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Fill generated release notes
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.3.0
         with:
           tag_name: ${{ github.ref_name }}
+          # 这里必须显式给 name：不给的话该 action 会把标题写回成 tag 名，
+          # 覆盖掉上面设好的「Token Usage X.Y.Z」
+          name: ${{ steps.ver.outputs.title }}
           draft: true
           prerelease: false
           generate_release_notes: true

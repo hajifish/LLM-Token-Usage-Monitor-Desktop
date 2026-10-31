@@ -8,17 +8,17 @@
 //! 接口形态来自社区逆向成果（CreditDaddy / qoder2api 实测可用），非官方文档
 //! 承诺；服务端调整时本供应商显式报错，不静默给出错误数值。
 
-use super::format_iso_reset;
-use crate::models::QuotaInfo;
+use super::{format_iso_reset, http_client, LlmProvider, ProviderError};
+use crate::models::{BalanceData, QuotaInfo};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
 
 /// 国际版 openapi 基址（qoder.com 账号）
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const GLOBAL_API_BASE: &str = "https://openapi.qoder.sh";
 /// 国内版 openapi 基址（qoder.cn 账号）
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const CN_API_BASE: &str = "https://openapi.qoder.com.cn";
 
 // --- 响应数据结构（字段宽容：缺失一律 default，避免服务端加字段即解析失败） ---
@@ -162,6 +162,206 @@ fn min_remaining_percent(rows: &[QuotaInfo]) -> f64 {
         .clamp(0.0, 100.0)
 }
 
+// --- 网络层 ---
+
+/// 网络链路分步错误：保留状态码类别供区域探测决策，出口统一转 ProviderError
+enum StepError {
+    /// 401/403：凭据被拒（PAT 无效/过期，或该凭据不属于此区域）
+    AuthDenied,
+    /// 其他非 2xx（404 参与区域决策：该区域网关无此路径）
+    Http(u16),
+    Network(String),
+    Parse(String),
+}
+
+/// 区域探测决策：仅鉴权类失败或 404 切国内重试——5xx/网络/解析错误与账号
+/// 区域无关，切换只会把真实故障掩盖成「两边都失败」。
+fn should_switch_region(e: &StepError) -> bool {
+    matches!(e, StepError::AuthDenied | StepError::Http(404))
+}
+
+fn to_provider_error(e: StepError) -> ProviderError {
+    match e {
+        StepError::AuthDenied => ProviderError(
+            "Qoder PAT 无效或已过期，请在 qoder.com / qoder.cn 控制台 Settings → Personal Access Tokens 重新创建"
+                .to_string(),
+        ),
+        StepError::Http(s) => ProviderError(format!("Qoder API error: {}", s)),
+        StepError::Network(m) => ProviderError(format!("Qoder 请求失败: {}", m)),
+        StepError::Parse(m) => ProviderError(format!("Qoder 响应解析失败: {}（接口可能已调整）", m)),
+    }
+}
+
+/// 轮内快照：fetch_balance 与 fetch_quota_infos 共享一次网络链路
+#[derive(Clone)]
+struct QoderSnapshot {
+    rows: Vec<QuotaInfo>,
+}
+
+pub struct QoderProvider {
+    client: Client,
+    api_key: String,
+    cached: tokio::sync::OnceCell<QoderSnapshot>,
+}
+
+impl QoderProvider {
+    pub fn new(api_key: &str) -> Self {
+        Self {
+            client: http_client(),
+            api_key: api_key.trim().to_string(),
+            cached: tokio::sync::OnceCell::new(),
+        }
+    }
+
+    async fn snapshot(&self) -> Result<&QoderSnapshot, ProviderError> {
+        self.cached
+            .get_or_try_init(|| async { self.fetch_snapshot().await })
+            .await
+    }
+
+    /// 先国际后国内；国际失败且可切换时重试国内，否则直接短路。
+    /// 不缓存「区域归属」：每轮最多多一组请求（默认 120s 间隔），换无全局状态。
+    async fn fetch_snapshot(&self) -> Result<QoderSnapshot, ProviderError> {
+        match self.fetch_from_base(GLOBAL_API_BASE).await {
+            Ok(rows) => Ok(QoderSnapshot { rows }),
+            Err(e) if should_switch_region(&e) => {
+                let rows = self
+                    .fetch_from_base(CN_API_BASE)
+                    .await
+                    .map_err(to_provider_error)?;
+                Ok(QoderSnapshot { rows })
+            }
+            Err(e) => Err(to_provider_error(e)),
+        }
+    }
+
+    /// 在指定区域完成 token 解析（pt- 兑换）→ 配额查询 → 计划名（尽力）→ 行映射
+    async fn fetch_from_base(&self, base: &str) -> Result<Vec<QuotaInfo>, StepError> {
+        let token = self.resolve_token(base).await?;
+        let resp = self.fetch_quota_usage(base, &token).await?;
+        let plan = self.fetch_plan_label(base, &token).await;
+        Ok(build_quota_rows(&resp, plan.as_deref()))
+    }
+
+    /// `pt-` 个人令牌先兑换短期 job token；其余原样使用（兼容直接粘贴 jt 联调）。
+    async fn resolve_token(&self, base: &str) -> Result<String, StepError> {
+        if !self.api_key.starts_with("pt-") {
+            return Ok(self.api_key.clone());
+        }
+        let url = format!("{}/api/v1/jobToken/exchange", base);
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "qodercli/1.0.0")
+            .header("Cosy-Version", "1.0.0")
+            .header("Cosy-ClientType", "5")
+            .body(serde_json::json!({ "personal_token": self.api_key }).to_string())
+            .send()
+            .await
+            .map_err(|e| StepError::Network(e.to_string()))?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
+        {
+            return Err(StepError::AuthDenied);
+        }
+        if !status.is_success() {
+            return Err(StepError::Http(status.as_u16()));
+        }
+        let data: Value = resp
+            .json()
+            .await
+            .map_err(|e| StepError::Parse(e.to_string()))?;
+        match data.get("token").and_then(|v| v.as_str()) {
+            Some(t) if !t.is_empty() => Ok(t.to_string()),
+            _ => Err(StepError::Parse("jobToken 兑换响应缺 token 字段".to_string())),
+        }
+    }
+
+    async fn fetch_quota_usage(
+        &self,
+        base: &str,
+        token: &str,
+    ) -> Result<QuotaUsageResponse, StepError> {
+        let url = format!("{}/api/v2/quota/usage", base);
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Cosy-ClientType", "10")
+            .header("User-Agent", "Qoder")
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|e| StepError::Network(e.to_string()))?;
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
+        {
+            return Err(StepError::AuthDenied);
+        }
+        if !status.is_success() {
+            return Err(StepError::Http(status.as_u16()));
+        }
+        resp.json()
+            .await
+            .map_err(|e| StepError::Parse(e.to_string()))
+    }
+
+    /// 订阅计划名（plan_tier_name），仅作 plan_label；任何失败都不阻断配额展示
+    async fn fetch_plan_label(&self, base: &str, token: &str) -> Option<String> {
+        let url = format!("{}/api/v2/user/plan", base);
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Cosy-ClientType", "10")
+            .header("User-Agent", "Qoder")
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let data: Value = resp.json().await.ok()?;
+        data.get("plan_tier_name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+    }
+}
+
+#[async_trait]
+impl LlmProvider for QoderProvider {
+    fn name(&self) -> &str {
+        "Qoder"
+    }
+
+    async fn fetch_balance(&self) -> Result<BalanceData, ProviderError> {
+        let snap = self.snapshot().await?;
+        let remaining = min_remaining_percent(&snap.rows);
+        Ok(BalanceData {
+            provider: "Qoder".to_string(),
+            available_balance: remaining,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: remaining,
+            currency: "%".to_string(),
+        })
+    }
+
+    async fn fetch_quota_infos(&self) -> Result<Option<Vec<QuotaInfo>>, ProviderError> {
+        let snap = self.snapshot().await?;
+        if snap.rows.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(snap.rows.clone()))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,5 +481,55 @@ mod tests {
             (min_remaining_percent(&[]) - 100.0).abs() < 1e-9,
             "空行 clamp 后应为满额 100"
         );
+    }
+
+    // ---- 区域探测决策（纯函数） ----
+
+    #[test]
+    fn region_switch_only_on_auth_or_404() {
+        assert!(should_switch_region(&StepError::AuthDenied));
+        assert!(should_switch_region(&StepError::Http(404)));
+        assert!(!should_switch_region(&StepError::Http(500)));
+        assert!(!should_switch_region(&StepError::Network("timeout".to_string())));
+        assert!(!should_switch_region(&StepError::Parse("bad json".to_string())));
+    }
+
+    // ---- 错误文案可操作 ----
+
+    #[test]
+    fn auth_error_message_names_pat_and_console() {
+        let msg = to_provider_error(StepError::AuthDenied).0;
+        assert!(msg.contains("PAT"), "got: {msg}");
+        assert!(msg.contains("Personal Access Tokens"), "got: {msg}");
+    }
+
+    #[test]
+    fn http_error_keeps_status_and_parse_mentions_adjustment() {
+        assert_eq!(
+            to_provider_error(StepError::Http(500)).0,
+            "Qoder API error: 500"
+        );
+        assert!(to_provider_error(StepError::Parse("x".to_string()))
+            .0
+            .contains("接口可能已调整"));
+        assert!(to_provider_error(StepError::Network("e".to_string()))
+            .0
+            .contains("请求失败"));
+    }
+
+    // ---- 手动 E2E：CI 不跑（无凭据） ----
+    // QODER_PAT=<pt-...> cargo test qoder_e2e_real_api -- --ignored --nocapture
+
+    #[test]
+    #[ignore]
+    fn qoder_e2e_real_api() {
+        let pat = std::env::var("QODER_PAT").expect("设 QODER_PAT 后运行");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let provider = QoderProvider::new(&pat);
+        let quotas = rt
+            .block_on(provider.fetch_quota_infos())
+            .expect("拉取配额失败");
+        println!("{quotas:#?}");
+        assert!(quotas.is_some(), "无任何配额行（检查 PAT 与区域）");
     }
 }

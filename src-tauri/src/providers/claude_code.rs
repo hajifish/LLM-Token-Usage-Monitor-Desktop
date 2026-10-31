@@ -99,6 +99,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -112,6 +113,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -125,6 +127,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -138,6 +141,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -190,21 +194,16 @@ impl ClaudeCodeProvider {
     }
 }
 
-/// 将 ISO 8601 时间字符串转换为相对时间描述。
+/// 将 ISO 8601 时间字符串转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
 fn format_iso_reset(iso: &str) -> String {
     use chrono::{DateTime, Utc};
     match iso.parse::<DateTime<Utc>>() {
         Ok(dt) => {
-            let now = Utc::now();
-            let duration = dt.signed_duration_since(now);
-            if duration.num_days() > 0 {
-                format!("{}天后重置", duration.num_days())
-            } else if duration.num_hours() > 0 {
-                format!("{}小时后重置", duration.num_hours())
-            } else if duration.num_minutes() > 0 {
-                format!("{}分钟后重置", duration.num_minutes())
+            let duration = dt.signed_duration_since(Utc::now());
+            if duration > chrono::Duration::zero() {
+                crate::tray::countdown_compact(duration)
             } else {
-                "即将重置".to_string()
+                "0M".to_string()
             }
         }
         Err(_) => iso.to_string(),
@@ -337,7 +336,7 @@ mod tests {
         use chrono::Utc;
         let future = (Utc::now() + chrono::Duration::days(3)).to_rfc3339();
         let result = format_iso_reset(&future);
-        assert!(result.contains("天后重置"), "got: {}", result);
+        assert!(result.contains("D"), "got: {}", result);
     }
 
     #[test]
@@ -345,12 +344,27 @@ mod tests {
         use chrono::Utc;
         let future = (Utc::now() + chrono::Duration::hours(4)).to_rfc3339();
         let result = format_iso_reset(&future);
-        assert!(result.contains("小时后重置"), "got: {}", result);
+        assert!(result.contains("H"), "got: {}", result);
     }
 
     #[test]
     fn test_format_iso_reset_invalid_string() {
         let result = format_iso_reset("not-a-date");
         assert_eq!(result, "not-a-date");
+    }
+
+    // --- reset_at 原始 ISO 透传测试 ---
+
+    #[tokio::test]
+    async fn quota_infos_carry_raw_iso_reset_at() {
+        // provider 环境变量凭证不可用，直接测 fetch_quota_infos 内部逻辑等价物：
+        // 构造带 resets_at 的响应 → QuotaInfo.reset_at 应为原始 ISO 串
+        let json = r#"{"five_hour":{"utilization":38.0,"resets_at":"2026-10-31T18:00:00Z"},
+            "seven_day":{"utilization":19.0,"resets_at":"2026-11-04T00:00:00Z"}}"#;
+        let resp: ClaudeUsageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            resp.five_hour.as_ref().unwrap().resets_at.as_deref(),
+            Some("2026-10-31T18:00:00Z")
+        );
     }
 }

@@ -18,6 +18,10 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 
+# Git worktrees（并行任务隔离工作区）
+.worktrees/
+.claude/worktrees/
+
 # Environment
 .env
 .env.local

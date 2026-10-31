@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>状态栏重设计 · 初步草图</title>
+<style>
+  /* ============ 页面画布（评审用，非应用 UI） ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    background: linear-gradient(160deg, #d8dade 0%, #c3c7cd 100%);
+    color: #23262c; padding: 40px 48px 80px; min-height: 100vh;
+  }
+  .sheet { max-width: 1060px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: .3px; }
+  .sub { color: #5a6068; font-size: 13px; margin-top: 6px; }
+  .sec { margin-top: 44px; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .sec-tag { font-size: 11px; font-weight: 700; color: #fff; background: #3c4048; border-radius: 5px; padding: 2px 7px; letter-spacing: .5px; }
+  .sec-title { font-size: 16px; font-weight: 700; }
+  .sec-note { font-size: 12px; color: #6a7078; }
+  .goal-chips { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .goal-chips span { font-size: 12px; background: rgba(255,255,255,.65); border: 1px solid rgba(0,0,0,.10); padding: 4px 10px; border-radius: 999px; color: #444a52; }
+  #themeToggle {
+    position: fixed; top: 18px; right: 22px; z-index: 99;
+    font-size: 12px; padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(0,0,0,.18);
+    background: rgba(255,255,255,.85); cursor: pointer; color: #333; font-weight: 600;
+  }
+  .footnote { font-size: 12px; color: #6a7078; margin-top: 10px; line-height: 1.7; }
+  .footnote b { color: #3a3f46; }
+  sup { color: #b25b00; font-weight: 700; }
+
+  /* ============ 供应商识别色（已通过 dataviz 六项校验 · dark） ============ */
+  :root {
+    --cc: #C96A4A; --cx: #9C6BF0; --z: #1F9FBB; --kc: #E0618C; --ds: #5A66E8; --oa: #199A70;
+  }
+
+  /* ============ 方案C：菜单栏文字模拟 ============ */
+  .bar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+  .bar-label { width: 210px; flex: none; text-align: right; font-size: 12px; color: #4a5058; line-height: 1.45; }
+  .bar-label b { color: #23262c; }
+  .menubar {
+    flex: 1; height: 28px; border-radius: 7px; background: rgba(24,25,28,.94);
+    display: flex; align-items: center; padding: 0 12px; gap: 4px;
+    color: #e9ebef; font-size: 13px; box-shadow: 0 2px 10px rgba(0,0,0,.18);
+    overflow: hidden; white-space: nowrap;
+  }
+  .menubar .apple { opacity: .9; margin-right: 10px; }
+  .menubar .app { margin-right: 14px; opacity: .85; }
+  .menubar .spacer { flex: 1; }
+  .menubar .status-text { font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+  .menubar .status-text .warn { color: #ffb020; font-weight: 700; }
+  .menubar .status-text .crit { color: #ff6b5e; font-weight: 700; }
+  .menubar .sys { margin-left: 6px; opacity: .85; }
+
+  /* ============ 面板主题变量 ============ */
+  .panel-scope {
+    --surface: #1d1e23; --surface2: #232429; --hover: rgba(255,255,255,.045);
+    --border: rgba(255,255,255,.09); --ink: #eceef2; --ink2: #9aa1ac; --ink3: #6d7480;
+    --track: rgba(255,255,255,.10); --good: #32c572; --warn: #ffb020; --crit: #ff5d4f;
+    --blur-bg: rgba(28,29,34,.90);
+  }
+  html[data-theme="light"] .panel-scope {
+    --surface: #ffffff; --surface2: #f4f5f7; --hover: rgba(0,0,0,.045);
+    --border: rgba(0,0,0,.10); --ink: #1b1e24; --ink2: #5a6270; --ink3: #8a919e;
+    --track: rgba(0,0,0,.09); --good: #1f9d55; --warn: #c77d00; --crit: #e03e30;
+    --blur-bg: rgba(250,250,252,.92);
+  }
+
+  /* ============ 方案A：情报面板 popover ============ */
+  .stage {
+    border-radius: 14px; padding: 34px 30px 30px;
+    background:
+      radial-gradient(600px 300px at 78% -8%, rgba(120,140,255,.35), transparent 60%),
+      radial-gradient(500px 260px at 20% 110%, rgba(255,150,120,.28), transparent 60%),
+      linear-gradient(145deg, #3a4252, #23283a 55%, #2d2a3e);
+    display: flex; justify-content: flex-end; position: relative;
+  }
+  .stage .stage-mb {
+    position: absolute; top: 0; left: 0; right: 0; height: 26px;
+    background: rgba(18,19,22,.85); display: flex; align-items: center; justify-content: flex-end;
+    padding: 0 14px; gap: 14px; color: #e9ebef; font-size: 12.5px; border-radius: 14px 14px 0 0;
+  }
+  .panel {
+    width: 378px; border-radius: 14px; margin-top: 22px; margin-right: 10px;
+    background: var(--blur-bg); backdrop-filter: blur(28px) saturate(1.4);
+    border: 1px solid var(--border); box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    color: var(--ink); overflow: hidden; font-size: 13px;
+  }
+  .p-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px 9px; }
+  .p-head .t { font-size: 13px; font-weight: 700; }
+  .p-head .updated { margin-left: auto; font-size: 11px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+  .icon-btn {
+    width: 24px; height: 24px; border-radius: 7px; border: 1px solid var(--border);
+    background: transparent; color: var(--ink2); font-size: 13px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { background: var(--hover); color: var(--ink); }
+
+  /* KPI 行 */
+  .kpis { display: grid; grid-template-columns: 1.2fr 1fr 1.35fr; gap: 8px; padding: 2px 12px 10px; }
+  .kpi { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px 8px; }
+  .kpi .k { font-size: 10.5px; color: var(--ink3); display: flex; align-items: center; gap: 4px; }
+  .kpi .v { font-size: 15.5px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 5px; }
+  .kpi .v .u { font-size: 10.5px; color: var(--ink2); font-weight: 500; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+
+  /* 分组标题 */
+  .group-h { display: flex; align-items: center; gap: 7px; padding: 9px 14px 5px; font-size: 11px; color: var(--ink3); font-weight: 600; letter-spacing: .4px; }
+  .group-h .cnt { margin-left: auto; font-weight: 500; }
+  .group-h .divider { flex: 1; height: 1px; background: var(--border); }
+
+  /* 供应商卡片 */
+  .card { padding: 9px 14px 10px; border-top: 1px solid var(--border); transition: background .12s; }
+  .card:hover { background: var(--hover); }
+  .c-top { display: flex; align-items: center; gap: 8px; }
+  .c-top .logo { width: 22px; height: 22px; border-radius: 6px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; }
+  .c-top .name { font-size: 14px; font-weight: 700; letter-spacing: .2px; }
+  .c-top .chip { font-size: 10.5px; color: var(--ink2); border: 1px solid var(--border); border-radius: 999px; padding: 1.5px 8px; white-space: nowrap; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  .c-top .val { margin-left: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 4px; }
+  .c-top .val .u { font-size: 11px; color: var(--ink2); font-weight: 500; }
+  .c-top .val.crit { color: var(--crit); }
+
+  /* 配额窗口行 */
+  .quota { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+  .quota .q { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; color: var(--ink3); width: 26px; flex: none; text-align: right; }
+  .quota .track { flex: 1; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .quota .fill { height: 100%; border-radius: 3px; }
+  .quota .meta { font-size: 11px; color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+  .quota .meta b { color: var(--ink); font-weight: 600; }
+  .quota .meta .cd { font-size: 10.5px; }
+  .cd.warn { color: var(--warn); font-weight: 600; }
+  .cd.crit { color: var(--crit); font-weight: 700; }
+
+  /* sparkline + 今日统计 */
+  .c-hist { display: flex; align-items: flex-end; gap: 10px; margin-top: 8px; height: 30px; }
+  .spark { flex: 1; display: flex; align-items: flex-end; gap: 2px; height: 100%; position: relative; }
+  .spark i { flex: 1; border-radius: 1.5px 1.5px 0 0; min-height: 2px; position: relative; cursor: default; }
+  .spark i:hover::after {
+    content: attr(data-tip); position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+    background: #000; color: #fff; font-size: 10px; padding: 2.5px 7px; border-radius: 5px; white-space: nowrap; z-index: 5;
+    font-variant-numeric: tabular-nums; pointer-events: none;
+  }
+  .c-hist .today { font-size: 10.5px; color: var(--ink3); white-space: nowrap; text-align: right; line-height: 1.5; font-variant-numeric: tabular-nums; flex: none; }
+  .c-hist .today b { color: var(--ink2); font-weight: 600; font-size: 11px; }
+
+  /* API 卡片副行 */
+  .api-sub { margin-top: 7px; font-size: 11.5px; color: var(--ink2); font-variant-numeric: tabular-nums; display: flex; gap: 10px; }
+  .api-sub b { color: var(--ink); font-weight: 600; }
+
+  .p-foot { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--border); padding: 8px 12px; background: var(--surface2); }
+  .p-foot .seg { font-size: 11.5px; color: var(--ink2); border: 1px solid var(--border); border-radius: 7px; padding: 3.5px 9px; }
+  .p-foot .seg b { color: var(--ink); font-weight: 600; }
+  .p-foot .gap { flex: 1; }
+  .p-foot .fn { font-size: 11.5px; color: var(--ink2); padding: 3.5px 7px; border-radius: 7px; cursor: pointer; }
+  .p-foot .fn:hover { background: var(--hover); color: var(--ink); }
+
+  /* ============ 方案B：原生菜单保底 ============ */
+  .nsmenu {
+    width: 344px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--blur-bg); backdrop-filter: blur(24px);
+    box-shadow: 0 14px 38px rgba(0,0,0,.35); color: var(--ink);
+    padding: 5px 0; font-size: 13px; display: inline-block; vertical-align: top;
+  }
+  .nsmenu .mi { padding: 3.5px 13px; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .nsmenu .mi.head { font-weight: 700; }
+  .nsmenu .mi.sub { color: var(--ink2); font-size: 12px; padding-left: 30px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+  .nsmenu .mi.disabled { color: var(--ink3); }
+  .nsmenu .mi.action:hover { background: #3178c6; color: #fff; border-radius: 0; }
+  .nsmenu .mi.action:hover .mono { color: #fff; }
+  .nsmenu .sep { height: 1px; background: var(--border); margin: 5px 10px; }
+  .nsmenu .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .nsmenu .bar-chars { letter-spacing: -0.5px; }
+  .nsmenu .b-good { color: var(--good); } .nsmenu .b-warn { color: var(--warn); } .nsmenu .b-crit { color: var(--crit); }
+  .nsmenu .arrow { margin-left: auto; color: var(--ink3); }
+  .nsmenu .check { width: 14px; text-align: center; color: var(--ink); }
+  .nsmenu .mi.action:hover .arrow, .nsmenu .mi.action:hover .check { color: #fff; }
+
+  /* ============ 对比表 ============ */
+  table.cmp { border-collapse: collapse; width: 100%; font-size: 12.5px; background: rgba(255,255,255,.7); border-radius: 10px; overflow: hidden; }
+  table.cmp th, table.cmp td { padding: 8px 12px; text-align: left; border-bottom: 1px solid rgba(0,0,0,.07); vertical-align: top; }
+  table.cmp th { background: rgba(0,0,0,.05); font-size: 12px; }
+  table.cmp td:first-child { font-weight: 700; white-space: nowrap; }
+  table.cmp .yes { color: #1f9d55; font-weight: 700; }
+  table.cmp .no { color: #c23a2d; font-weight: 700; }
+  table.cmp .part { color: #b25b00; font-weight: 700; }
+
+  .qa { background: rgba(255,255,255,.7); border-radius: 10px; padding: 16px 20px; font-size: 13px; line-height: 2; }
+  .qa b { display: inline-block; background: #3c4048; color: #fff; border-radius: 5px; font-size: 11px; padding: 1px 7px; margin-right: 8px; }
+</style>
+</head>
+<body>
+<button id="themeToggle">🌓 面板亮 / 暗</button>
+<div class="sheet">
+
+  <h1>状态栏重设计 · 初步草图 <span style="font-size:12px;color:#6a7078;font-weight:500">v1 · 2026-10-31 · 仅逻辑评审用</span></h1>
+  <div class="sub">三层结构：① 菜单栏常显文字（一眼扫）→ ② 点击后的展开层（完整信息）→ ③ 主页（深排查）。本次重设计聚焦 ①②，目标是「不打开主页也能看清全部供应商」。</div>
+  <div class="goal-chips">
+    <span>🎯 突出供应商名称</span>
+    <span>📊 Coding Plan → 剩余 % + 各窗口刷新倒计时</span>
+    <span>💰 API → 余额 + 今日消耗</span>
+    <span>📈 历史趋势（最近 24h 消耗频率）</span>
+  </div>
+
+  <!-- ================================================= -->
+  <div class="sec">
+    <div class="sec-head">
+      <span class="sec-tag">方案 C</span>
+      <span class="sec-title">菜单栏常显文字（4 种变体）</span>
+      <span class="sec-note">现状是 V1；空间越往右越省，但信息也越少</span>
+    </div>
+    <div id="barVariants"></div>
+    <div class="footnote">
+      约定：<b>短码</b> CC=Claude Code、CX=Codex、Z=智谱、KC=Kimi Code、DS=DeepSeek、OA=OpenAI；<b>告警态</b>（剩余&lt;10%）数值标红并附倒计时；倒计时格式 <b>1:24</b> = 1小时24分后重置。V3 聚合模式只显示「最紧张的一项」，其余全部收进点击后的面板 —— 菜单栏空间最省，适合 notch 机型。
+    </div>
+  </div>
+
+  <!-- ================================================= -->
+  <div class="sec panel-scope">
+    <div class="sec-head">
+      <span class="sec-tag">方案 A</span>
+      <span class="sec-title">点击图标 → 情报面板（参考截图的方向）</span>
+      <span class="sec-note">新增 popover 窗体¹ · 历史趋势需新增本地采样²</span>
+    </div>
+    <div class="stage">
+      <div class="stage-mb"><span>⟐</span><span>wi-fi</span><span>▮▮▮</span></div>
+      <div class="panel" id="panelA"></div>
+    </div>
+    <div class="footnote" style="margin-top:12px">
+      结构：<b>顶部 KPI 三 tile</b>（最近重置 / 最低剩余 / API 合计）→ <b>按套餐类型分组</b>（订阅计划在上、API 余额在下，两类展示逻辑天然不同）→ 每卡片三行：<b>名称行</b>（彩色 logo 块 + 粗体名称 + 账号别名 chip + 右侧主数值）、<b>配额行</b>（每个窗口一条已用进度条 + 剩余% + 倒计时；进度条颜色 = 剩余紧张度³）、<b>历史行</b>（24h 每小时消耗 sparkline² + 今日汇总）。悬停卡片高亮、sparkline 单柱有 tooltip。
+    </div>
+  </div>
+
+  <!-- ================================================= -->
+  <div class="sec panel-scope">
+    <div class="sec-head">
+      <span class="sec-tag">方案 B</span>
+      <span class="sec-title">保底：原生菜单增强（Traffic Monitor 风格）</span>
+      <span class="sec-note">零新增窗体 · 纯文本改造 · quota_infos 已在拉取但当前未上菜单</span>
+    </div>
+    <div class="nsmenu" id="menuB"></div>
+    <div class="footnote">
+      保持现有 NSMenu 通道（原地 set_text 刷新基础设施全部复用），但把每供应商从「一行」扩为「标题行 + 明细行」：标题行 = 名称 + 主指标；明细行 = 各配额窗口的文本进度条与倒计时（<b>▓=已用</b>）。原生菜单不支持粗体/双列/图形，标题行以图标色点区分供应商，明细行为置灰文本。历史趋势在此方案中无法呈现（纯文本放不下）。
+    </div>
+  </div>
+
+  <!-- ================================================= -->
+  <div class="sec">
+    <div class="sec-head">
+      <span class="sec-tag">对照</span>
+      <span class="sec-title">三方案对比与数据依赖</span>
+    </div>
+    <table class="cmp">
+      <tr><th style="width:130px">维度</th><th>方案 A 情报面板</th><th>方案 B 原生菜单增强</th><th>方案 C 菜单栏文字</th></tr>
+      <tr><td>信息完整度</td><td class="yes">全部：名称/多窗口/倒计时/历史/今日</td><td class="part">名称/多窗口/倒计时/今日，无历史</td><td class="no">仅 1 个主指标/家</td></tr>
+      <tr><td>图形能力</td><td class="yes">进度条 · sparkline · 状态色</td><td class="no">仅文本字符进度条</td><td class="no">纯文本</td></tr>
+      <tr><td>实现成本</td><td class="part">新增 popover 窗体（锚定托盘、失焦即隐）+ 历史采样</td><td class="yes">最低：scheduler 菜单文本重构</td><td class="yes">最低：build_tray_title 改格式</td></tr>
+      <tr><td>风险</td><td>窗体定位/失焦/多屏适配；交互与原生菜单并存取舍</td><td>行数变多（每家 2~3 行）</td><td>几乎无</td></tr>
+      <tr><td>建议</td><td colspan="3">A 为主体承载「完整信息」目标；C 同步升级（倒计时/告警着色）；B 作为 A 的降级开关或过渡阶段实现 —— 三者不互斥，共用同一套数据格式化函数。</td></tr>
+    </table>
+    <div class="footnote">
+      数据依赖：<b>已有</b> — quota_infos（含各窗口 used/total/remaining/reset_time，Claude Code 已输出 5小时/7天/7天Opus/7天Sonnet 四窗口）、balance（% / USD / CNY）、usage（today tokens/requests/cost）。<b>需新增</b> — ¹popover 窗体（Tauri 隐藏窗口，点击托盘时定位到图标下方显示）；²历史采样（每次轮询把 quota/usage 快照追加到本地 SQLite/JSON，供 sparkline 与「今日/本周」聚合）；³紧张度阈值（当前代码：&lt;5% 黄、0% 红 —— 草图用 ≥35% 绿 / 10~35% 琥珀 / &lt;10% 红，阈值可调）。
+    </div>
+  </div>
+
+  <!-- ================================================= -->
+  <div class="sec">
+    <div class="sec-head">
+      <span class="sec-tag">待确认</span>
+      <span class="sec-title">请对照草图确认的问题</span>
+    </div>
+    <div class="qa">
+      <div><b>Q1</b>展开层选 A（富面板）还是 B（原生菜单）？或 A 为主、B 做设置里的「简洁模式」？</div>
+      <div><b>Q2</b>菜单栏常显文字（方案 C）你倾向 V1~V4 哪个密度？告警时是否自动切到 V2 式的「标红+倒计时」？</div>
+      <div><b>Q3</b>订阅计划的多窗口（Claude Code 有 5h / 7天 / 7天Opus / 7天Sonnet 四条）：默认全部展示，还是只显示「最紧的一条」+ 其余折叠？</div>
+      <div><b>Q4</b>历史维度用「24h 每小时消耗频率」（草图现状）还是「按天聚合的近 7 天」？两者都做的话面板里怎么切换？</div>
+      <div><b>Q5</b>面板密度：草图约 6 家供应商 → 520px 高。供应商更多时接受「组内滚动」还是「默认折叠 API 组」？</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============ 假数据（字段名对齐 models.rs：quota_infos / balance / usage） ============ */
+const PROVIDERS = [
+  {
+    name: 'Claude Code', color: 'var(--cc)', init: 'CC', chip: 'Max 5× · 工作',
+    type: 'plan',
+    main: { v: '62', u: '%' },
+    quotas: [
+      { label: '5h', used: 38, remain: '62%', cd: '1:24 后重置', level: 'good' },
+      { label: '7d', used: 19, remain: '81%', cd: '3d4h 后重置', level: 'good' },
+    ],
+    spark: [2,4,7,13,6,3,2,4,9,17,21,12,7,5,9,14,11,6,4,3,5,8,6,3],
+    today: ['2.1M tok', '42 次'],
+  },
+  {
+    name: 'Codex', color: 'var(--cx)', init: 'CX', chip: 'Pro',
+    type: 'plan',
+    main: { v: '9', u: '%', crit: true },
+    quotas: [
+      { label: '5h', used: 91, remain: '9%', cd: '12分后重置', level: 'crit' },
+      { label: '周', used: 36, remain: '64%', cd: '2d18h 后重置', level: 'good' },
+    ],
+    spark: [1,3,6,11,8,15,24,19,28,34,22,9,12,17,25,31,18,7,4,2,3,6,4,2],
+    today: ['4.8M tok', '61 次'],
+  },
+  {
+    name: 'Zhipu', color: 'var(--z)', init: 'Z', chip: 'GLM Coding Pro',
+    type: 'plan',
+    main: { v: '47', u: '%' },
+    quotas: [
+      { label: '5h', used: 53, remain: '47%', cd: '2:05 后重置', level: 'good' },
+    ],
+    spark: [1,2,5,9,4,2,1,3,8,13,16,9,5,4,7,10,8,4,2,1,2,5,3,1],
+    today: ['1.4M tok', '35 次'],
+  },
+  {
+    name: 'Kimi Code', color: 'var(--kc)', init: 'KC', chip: '测试号',
+    type: 'plan',
+    main: { v: '23', u: '%' },
+    quotas: [
+      { label: '5h', used: 77, remain: '23%', cd: '4:12 后重置', level: 'warn' },
+    ],
+    spark: [0,1,3,5,2,1,0,2,6,9,12,7,3,2,5,8,6,3,1,0,1,3,2,0],
+    today: ['0.9M tok', '12 次'],
+  },
+  {
+    name: 'DeepSeek', color: 'var(--ds)', init: 'DS', chip: 'API',
+    type: 'api',
+    main: { v: '¥88.88' },
+    apiSub: [['今日消耗', '¥1.24'], ['请求', '42 次'], ['Tokens', '1.2M']],
+    spark: [1,2,4,8,3,2,1,3,7,11,14,8,4,3,6,9,7,3,2,1,2,4,3,1],
+    today: ['¥1.24 · 42 次'],
+  },
+  {
+    name: 'OpenAI', color: 'var(--oa)', init: 'OA', chip: 'API',
+    type: 'api',
+    main: { v: '$12.34' },
+    apiSub: [['今日消耗', '$0.86'], ['请求', '31 次'], ['Tokens', '118k']],
+    spark: [1,1,3,6,2,1,0,2,5,9,11,6,3,2,4,7,5,2,1,0,1,2,2,0],
+    today: ['$0.86 · 31 次'],
+  },
+];
+const LVL = { good: 'var(--good)', warn: 'var(--warn)', crit: 'var(--crit)' };
+
+/* ============ 方案A 面板 ============ */
+function quotaRow(q) {
+  return `<div class="quota">
+    <span class="q">${q.label}</span>
+    <div class="track"><div class="fill" style="width:${q.used}%;background:${LVL[q.level]}"></div></div>
+    <span class="meta">剩 <b>${q.remain}</b> · <span class="cd ${q.level === 'good' ? '' : q.level}">${q.cd}</span></span>
+  </div>`;
+}
+function sparkHTML(p) {
+  const max = Math.max(...p.spark);
+  return p.spark.map((v, i) =>
+    `<i style="height:${Math.max(4, v / max * 100)}%;background:${p.color};opacity:${0.35 + 0.5 * v / max}"
+        data-tip="${String(i).padStart(2,'0')}:00 · ${(v*100)}k tok"></i>`).join('');
+}
+function cardHTML(p) {
+  const quotas = p.type === 'plan'
+    ? p.quotas.map(quotaRow).join('')
+    : `<div class="api-sub">${p.apiSub.map(([k, v]) => `<span>${k} <b>${v}</b></span>`).join('')}</div>`;
+  return `<div class="card">
+    <div class="c-top">
+      <span class="logo" style="background:${p.color}">${p.init}</span>
+      <span class="name">${p.name}</span>
+      <span class="chip">${p.chip}</span>
+      <span class="val${p.main.crit ? ' crit' : ''}">${p.main.v}${p.main.u ? `<span class="u">${p.main.u}</span>` : ''}</span>
+    </div>
+    ${quotas}
+    <div class="c-hist">
+      <div class="spark">${sparkHTML(p)}</div>
+      <div class="today">${p.today.map(t => `<b>${t}</b>`).join('<br>')}</div>
+    </div>
+  </div>`;
+}
+document.getElementById('panelA').innerHTML = `
+  <div class="p-head">
+    <span class="t">用量</span>
+    <span class="updated">更新于 14:32</span>
+    <button class="icon-btn">⟳</button>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="k"><span class="dot" style="background:var(--crit)"></span>最近重置</div>
+      <div class="v">12<span class="u">分 · Codex</span></div></div>
+    <div class="kpi"><div class="k">最低剩余</div>
+      <div class="v" style="color:var(--crit)">9<span class="u">% · Codex</span></div></div>
+    <div class="kpi"><div class="k">API 合计</div>
+      <div class="v" style="font-size:13.5px">¥88.88<span class="u">/</span>$12.34</div></div>
+  </div>
+  <div class="group-h">订阅计划 · 剩余% + 窗口倒计时<span class="divider"></span><span class="cnt">4 项</span></div>
+  ${PROVIDERS.filter(p => p.type === 'plan').map(cardHTML).join('')}
+  <div class="group-h">API 余额 · 余额 + 今日消耗<span class="divider"></span><span class="cnt">2 项</span></div>
+  ${PROVIDERS.filter(p => p.type === 'api').map(cardHTML).join('')}
+  <div class="p-foot">
+    <span class="seg">⟳ 刷新间隔 <b>1 分钟</b> ▾</span>
+    <span class="gap"></span>
+    <span class="fn">🏠 打开主页</span>
+    <span class="fn">⚙︎</span>
+    <span class="fn">⏻</span>
+  </div>`;
+
+/* ============ 方案B 原生菜单 ============ */
+function bar10(used, level) {
+  const n = Math.round(used / 10);
+  const cls = level === 'crit' ? 'b-crit' : level === 'warn' ? 'b-warn' : 'b-good';
+  return `<span class="bar-chars ${cls}">${'▓'.repeat(n)}</span><span class="bar-chars" style="opacity:.3">${'░'.repeat(10 - n)}</span>`;
+}
+function menuProvider(p) {
+  // 原生菜单是单行文本（无粗体/双列/图形）：标题行与明细行都是普通菜单项，如实按行内文本排布
+  if (p.type === 'plan') {
+    const head = `<div class="mi head"><span class="dot" style="background:${p.color};width:8px;height:8px"></span>${p.name} · ${p.chip.split('·')[0].trim()} — <span class="mono">剩 <b style="${p.main.crit ? 'color:var(--crit)' : ''}">${p.main.v}${p.main.u || ''}</b></span></div>`;
+    const subs = p.quotas.map(q =>
+      `<div class="mi sub">${q.label} ${bar10(q.used, q.level)} 剩${q.remain} · ${q.cd}</div>`).join('');
+    return head + subs;
+  }
+  const sub = p.apiSub.map(([k, v]) => (k === '请求' ? `${v.replace(' 次', '次')}` : v)).join(' · ');
+  return `<div class="mi head"><span class="dot" style="background:${p.color};width:8px;height:8px"></span>${p.name} — <span class="mono"><b>${p.main.v}</b></span></div>
+    <div class="mi sub">今日 ${sub}</div>`;
+}
+document.getElementById('menuB').innerHTML =
+  PROVIDERS.map(menuProvider).join('<div class="sep"></div>') +
+  `<div class="sep"></div>
+   <div class="mi disabled">更新于 14:32</div>
+   <div class="mi action">刷新间隔<span class="arrow">›</span></div>
+   <div class="sep"></div>
+   <div class="mi action">打开主页</div>
+   <div class="mi action">检查更新</div>
+   <div class="mi action">⏻ 退出</div>`;
+
+/* ============ 方案C 菜单栏变体 ============ */
+const VARIANTS = [
+  ['V1 · 现状（每家 1 个主指标）', `CC 62% · CX 9% · Z 47% · KC 23% · DS ¥88.88`],
+  ['V2 · 告警着色 + 主力倒计时', `CC 62%<span style="color:var(--ink3)">·</span>1:24 · <span class="crit">CX 9% · 12m</span> · Z 47% · DS ¥88.88`],
+  ['V3 · 聚合（只显最紧张一项）', `<span class="crit">⚡ 9% · 12m</span> · CC 62%`],
+  ['V4 · 全量倒计时（最密）', `CC 62% 1:24 · <span class="crit">CX 9% 12m</span> · Z 47% 2:05 · KC 23% 4:12 · DS ¥88.88`],
+];
+document.getElementById('barVariants').innerHTML = VARIANTS.map(([label, html]) => `
+  <div class="bar-row">
+    <div class="bar-label">${label}</div>
+    <div class="menubar">
+      <span class="apple"></span><span class="app">访达</span><span class="app">终端</span><span class="app">Safari</span>
+      <span class="spacer"></span>
+      <span class="status-text">${html}</span>
+      <span class="sys">⟐</span><span class="sys">▮</span>
+    </div>
+  </div>`).join('');
+
+/* 亮暗切换（仅影响面板作用域） */
+document.getElementById('themeToggle').onclick = () => {
+  const el = document.documentElement;
+  el.dataset.theme = el.dataset.theme === 'dark' ? 'light' : 'dark';
+};
+</script>
+</body>
+</html>

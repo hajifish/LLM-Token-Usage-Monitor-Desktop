@@ -161,6 +161,10 @@ impl LlmProvider for ZhipuProvider {
                     remaining,
                     remaining_percent,
                     reset_time,
+                    reset_at: l
+                        .next_reset_time
+                        .and_then(|ms| chrono::DateTime::from_timestamp((ms / 1000) as i64, 0))
+                        .map(|dt| dt.to_rfc3339()),
                     plan_label,
                 }
             })

@@ -1,6 +1,7 @@
 use super::{http_client, LlmProvider, ProviderError};
 use crate::models::{BalanceData, QuotaInfo};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -117,6 +118,8 @@ impl LlmProvider for CodexProvider {
                     remaining: Some(100.0 - pw.used_percent as f64),
                     remaining_percent: 100.0 - pw.used_percent as f64,
                     reset_time: Some(format_reset_time(pw.reset_at)),
+                    reset_at: DateTime::<Utc>::from_timestamp(pw.reset_at, 0)
+                        .map(|dt| dt.to_rfc3339()),
                     plan_label: plan_label.clone(),
                 });
             }
@@ -129,6 +132,8 @@ impl LlmProvider for CodexProvider {
                     remaining: Some(100.0 - sw.used_percent as f64),
                     remaining_percent: 100.0 - sw.used_percent as f64,
                     reset_time: Some(format_reset_time(sw.reset_at)),
+                    reset_at: DateTime::<Utc>::from_timestamp(sw.reset_at, 0)
+                        .map(|dt| dt.to_rfc3339()),
                     plan_label: plan_label.clone(),
                 });
             }
@@ -183,20 +188,17 @@ impl CodexProvider {
     }
 }
 
-/// 将 Unix 时间戳转换为相对时间描述（如 "2小时后重置"）。
+/// 将 Unix 时间戳转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
 fn format_reset_time(reset_at: i64) -> String {
     use chrono::{DateTime, Utc};
     let reset_dt = DateTime::<Utc>::from_timestamp(reset_at, 0);
     match reset_dt {
         Some(dt) => {
-            let now = Utc::now();
-            let duration = dt.signed_duration_since(now);
-            if duration.num_hours() > 0 {
-                format!("{}小时后重置", duration.num_hours())
-            } else if duration.num_minutes() > 0 {
-                format!("{}分钟后重置", duration.num_minutes())
+            let duration = dt.signed_duration_since(Utc::now());
+            if duration > chrono::Duration::zero() {
+                crate::tray::countdown_compact(duration)
             } else {
-                "即将重置".to_string()
+                "0M".to_string()
             }
         }
         None => String::new(),
@@ -356,7 +358,7 @@ mod tests {
         use chrono::Utc;
         let future_ts = Utc::now().timestamp() + 7200;
         let result = format_reset_time(future_ts);
-        assert!(result.contains("小时后重置"), "got: {}", result);
+        assert!(result.contains("H"), "got: {}", result);
     }
 
     #[test]
@@ -364,7 +366,7 @@ mod tests {
         use chrono::Utc;
         let future_ts = Utc::now().timestamp() + 1800;
         let result = format_reset_time(future_ts);
-        assert!(result.contains("分钟后重置"), "got: {}", result);
+        assert!(result.contains("M"), "got: {}", result);
     }
 
     #[test]

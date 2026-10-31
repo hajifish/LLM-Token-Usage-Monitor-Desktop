@@ -27,6 +27,24 @@ pub const ALL_PROVIDER_TYPES: &[&str] = &[
     "Zhipu",
 ];
 
+/// 供应商类型统一显示名（UI 全系统展示口径；内部类型名是配置键/工厂键，不变）。
+/// 约定：智谱用中文；OpenAI/Anthropic 带 (API) 后缀；Codex 无后缀；Kimi 分 API/Code 两个。
+/// 无别名账号的菜单/tooltip/状态栏回退名与 provider_show_in_tray 的配置侧回退
+/// 都取自此函数——两侧必须同源，否则逐服务商开关对无别名账号静默失效。
+pub fn display_name(name: &str) -> &str {
+    match name {
+        "OpenAI" => "OpenAI(API)",
+        "Codex" => "Codex",
+        "Anthropic" => "Anthropic(API)",
+        "Claude Code" => "Claude Code",
+        "DeepSeek" => "DeepSeek",
+        "Kimi API" | "Kimi" => "Kimi API",
+        "Kimi Code" => "Kimi Code",
+        "Zhipu" => "智谱",
+        other => other,
+    }
+}
+
 #[derive(Debug)]
 pub struct ProviderError(pub String);
 
@@ -183,7 +201,45 @@ pub(crate) mod test_util {
 #[cfg(test)]
 mod tests {
     use super::test_util::val;
-    use super::{amount_to_f64, append_query_param};
+    use super::{amount_to_f64, append_query_param, display_name};
+
+    #[test]
+    fn display_name_maps_all_types() {
+        // 显示名统一约定：智谱中文、OpenAI/Anthropic 带 (API)、Codex 无后缀
+        let expected = [
+            ("OpenAI", "OpenAI(API)"),
+            ("Codex", "Codex"),
+            ("Anthropic", "Anthropic(API)"),
+            ("Claude Code", "Claude Code"),
+            ("DeepSeek", "DeepSeek"),
+            ("Kimi API", "Kimi API"),
+            ("Kimi Code", "Kimi Code"),
+            ("Zhipu", "智谱"),
+        ];
+        for (internal, display) in expected {
+            assert_eq!(
+                display_name(internal),
+                display,
+                "{} 显示名应为 {}",
+                internal,
+                display
+            );
+        }
+        // 每个内置类型都必须出现在显式映射表里（新增类型漏配时在此暴露）
+        for t in super::ALL_PROVIDER_TYPES {
+            assert!(
+                expected.iter().any(|(internal, _)| *internal == *t),
+                "内置类型 {} 缺少显示名映射",
+                t
+            );
+        }
+    }
+
+    #[test]
+    fn display_name_legacy_kimi_alias() {
+        // 历史配置的 "Kimi" 由工厂归一化为 Kimi API，显示名同样归一
+        assert_eq!(display_name("Kimi"), "Kimi API");
+    }
 
     #[test]
     fn test_amount_to_f64_all_forms() {

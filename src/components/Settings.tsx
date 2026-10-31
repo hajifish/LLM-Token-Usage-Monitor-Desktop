@@ -8,10 +8,11 @@ interface SettingsProps {
 }
 
 // 新增类型时同步 providers/mod.rs::ALL_PROVIDER_TYPES 与 tray.rs::tray_short_code
+/** 服务商类型下拉与显示名（与 providers/mod.rs 的 display_name 保持同口径）。 */
 const PROVIDER_OPTIONS = [
-  { value: 'OpenAI', label: 'OpenAI' },
-  { value: 'Codex', label: 'Codex (ChatGPT)' },
-  { value: 'Anthropic', label: 'Anthropic' },
+  { value: 'OpenAI', label: 'OpenAI(API)' },
+  { value: 'Codex', label: 'Codex' },
+  { value: 'Anthropic', label: 'Anthropic(API)' },
   { value: 'Claude Code', label: 'Claude Code' },
   { value: 'DeepSeek', label: 'DeepSeek' },
   { value: 'Kimi API', label: 'Kimi API' },

@@ -198,6 +198,31 @@ pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>)
         .or_else(|| q.reset_time.clone())
 }
 
+/// 订阅计划多窗口中的主窗口：剩余百分比最低者；
+/// 差 <0.5 视为并列，取重置时刻更近者；无 reset_at 的排最后
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn primary_quota(quotas: &[crate::models::QuotaInfo]) -> Option<&crate::models::QuotaInfo> {
+    quotas.iter().min_by(|a, b| {
+        if (a.remaining_percent - b.remaining_percent).abs() >= 0.5 {
+            a.remaining_percent
+                .partial_cmp(&b.remaining_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        } else {
+            reset_timestamp(a).cmp(&reset_timestamp(b))
+        }
+    })
+}
+
+/// 重置时刻换算为 Unix 秒（并列时比远近用）；缺失/解析失败视为最远
+#[cfg_attr(not(test), allow(dead_code))]
+fn reset_timestamp(q: &crate::models::QuotaInfo) -> i64 {
+    q.reset_at
+        .as_deref()
+        .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+        .map(|dt| dt.timestamp())
+        .unwrap_or(i64::MAX)
+}
+
 /// 该服务商是否需要在状态栏展示：按 name + 回退后的 alias 匹配配置项，
 /// 匹配不到时默认展示（与 serde default 的「新字段默认开」语义一致）。
 /// 两侧 alias 均 trim 后比较：scheduler 的 display_alias 仅过滤纯空白、原样保留其余空白，
@@ -748,5 +773,55 @@ mod countdown_tests {
         );
         // 均无
         assert_eq!(quota_countdown_menu(&q(None, None), now), None);
+    }
+}
+
+#[cfg(test)]
+mod primary_quota_tests {
+    use super::*;
+    use crate::models::QuotaInfo;
+
+    fn q(name: &str, remaining: f64, reset_at: Option<&str>) -> QuotaInfo {
+        QuotaInfo {
+            name: name.into(),
+            used: 100.0 - remaining,
+            total: 100.0,
+            current_value: None,
+            remaining: Some(remaining),
+            remaining_percent: remaining,
+            reset_time: None,
+            plan_label: None,
+            reset_at: reset_at.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn picks_lowest_remaining() {
+        let qs = [q("5小时", 62.0, None), q("7天", 81.0, None)];
+        assert_eq!(primary_quota(&qs).unwrap().name, "5小时");
+    }
+
+    #[test]
+    fn near_tie_prefers_sooner_reset() {
+        // 差 0.4 < 0.5 并列 → 取重置更近者（5小时虽然剩余略高但 1h 后重置）
+        let qs = [
+            q("7天", 62.0, Some("2026-11-06T00:00:00Z")),
+            q("5小时", 62.4, Some("2026-10-31T13:00:00Z")),
+        ];
+        assert_eq!(primary_quota(&qs).unwrap().name, "5小时");
+    }
+
+    #[test]
+    fn missing_reset_at_sorts_last_on_tie() {
+        let qs = [
+            q("7天", 62.0, None),
+            q("5小时", 62.2, Some("2026-10-31T13:00:00Z")),
+        ];
+        assert_eq!(primary_quota(&qs).unwrap().name, "5小时");
+    }
+
+    #[test]
+    fn empty_returns_none() {
+        assert!(primary_quota(&[]).is_none());
     }
 }

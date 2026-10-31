@@ -1,6 +1,7 @@
 use crate::config::ConfigHealth;
-use crate::models::{AppConfig, BalanceData, ProviderStatus, UsageSummary};
+use crate::models::{AppConfig, BalanceData, ProviderStatus, QuotaInfo, UsageData, UsageSummary};
 use crate::providers;
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -65,12 +66,173 @@ fn format_provider_line(p: &ProviderStatus) -> String {
     }
 }
 
-/// 供应商列表签名：name|alias 序列。签名不变时托盘菜单只原地改写文案。
+/// 一个供应商的托盘菜单块：标题行 + 明细行 + 折叠窗口行（非空时渲染「其余 N 个窗口」子菜单）
+/// Task 4 接入 update_tray_menu 前，bin 构建暂不可达（同 tray.rs 顶部 Task 2 惯例）。
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct ProviderMenuBlock {
+    pub title: String,
+    pub details: Vec<String>,
+    pub extra_windows: Vec<String>,
+}
+
+/// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
+#[cfg_attr(not(test), allow(dead_code))]
+const DETAIL_INDENT: &str = "  ";
+
+/// 菜单块状态点：沿用告警级别规则；数据获取失败（无 balance）显示黄点，
+/// 与「无数据」的绿点区分（provider_warning_level 对 balance=None 一律 0，
+/// 该规则同时被状态栏/图标告警消费，不宜为本处单独放宽）
+#[cfg_attr(not(test), allow(dead_code))]
+fn block_dot(p: &ProviderStatus) -> &'static str {
+    let level = if p.balance.is_none() && p.error.is_some() {
+        1
+    } else {
+        crate::tray::provider_warning_level(p)
+    };
+    status_dot(level)
+}
+
+/// 单个 quota 窗口的菜单明细行：缩进 + 名称 + 进度条 + 剩余%，有倒计时时追加
+#[cfg_attr(not(test), allow(dead_code))]
+fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
+    let used_pct = if q.total > 0.0 {
+        q.used / q.total * 100.0
+    } else {
+        0.0
+    };
+    let bar = progress_bar(used_pct, 10);
+    match crate::tray::quota_countdown_menu(q, now) {
+        Some(cd) => format!(
+            "{DETAIL_INDENT}{} {} 剩{:.0}% · {}",
+            q.name, bar, q.remaining_percent, cd
+        ),
+        None => format!(
+            "{DETAIL_INDENT}{} {} 剩{:.0}%",
+            q.name, bar, q.remaining_percent
+        ),
+    }
+}
+
+/// token 数人性化：980 / 9.8k / 1.2M / 2.5B
+#[cfg_attr(not(test), allow(dead_code))]
+fn format_tokens(n: u64) -> String {
+    let unit = if n >= 1_000_000_000 {
+        (1_000_000_000, "B")
+    } else if n >= 1_000_000 {
+        (1_000_000, "M")
+    } else if n >= 1_000 {
+        (1_000, "k")
+    } else {
+        return n.to_string();
+    };
+    let v = n as f64 / unit.0 as f64;
+    if v >= 10.0 {
+        format!("{:.0}{}", v, unit.1)
+    } else {
+        format!("{:.1}{}", v, unit.1)
+    }
+}
+
+/// 今日用量明细行（花费/次数/token 有其一才返回）
+#[cfg_attr(not(test), allow(dead_code))]
+fn usage_line(u: &UsageData) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(cost) = u.today_cost {
+        parts.push(format!("{:.2}", cost));
+    }
+    if let Some(req) = u.today_requests {
+        parts.push(format!("{}次", req));
+    }
+    if u.total_tokens > 0 {
+        parts.push(format!("{} tok", format_tokens(u.total_tokens)));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("{DETAIL_INDENT}今日 {}", parts.join(" · ")))
+    }
+}
+
+/// 供应商 → 菜单块。percent 型消费 quota_infos（标题主指标取主窗口 remaining_percent，
+/// 主窗口选择复用 tray::primary_quota 规则）；API 型标题为余额、有 usage 时加今日明细行
+#[cfg_attr(not(test), allow(dead_code))]
+fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBlock {
+    let dot = block_dot(p);
+    let percent_quota = p
+        .balance
+        .as_ref()
+        .filter(|b| b.is_percent())
+        .and_then(|_| p.quota_infos.as_ref().filter(|qs| !qs.is_empty()));
+
+    if let Some(quotas) = percent_quota {
+        // 复用 primary_quota 拿主窗口引用，再按指针恒等回索引，
+        // 并列比较逻辑（差<0.5 取重置更近）只在 tray 侧维护一份
+        if let Some(primary) = crate::tray::primary_quota(quotas) {
+            let idx = quotas
+                .iter()
+                .position(|q| std::ptr::eq(q, primary))
+                .expect("primary 来自 quotas，指针恒等必命中");
+            return ProviderMenuBlock {
+                title: format!("{} {} — 剩 {:.0}%", dot, p.alias, primary.remaining_percent),
+                details: vec![quota_line(primary, now)],
+                extra_windows: quotas
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != idx)
+                    .map(|(_, q)| quota_line(q, now))
+                    .collect(),
+            };
+        }
+    }
+
+    match &p.balance {
+        Some(b) if b.is_percent() => ProviderMenuBlock {
+            title: format!("{} {} — 剩 {:.0}%", dot, p.alias, b.available_balance),
+            details: vec![],
+            extra_windows: vec![],
+        },
+        Some(b) if b.is_usd() => ProviderMenuBlock {
+            title: format!("{} {} — ${:.2}", dot, p.alias, b.available_balance),
+            details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
+            extra_windows: vec![],
+        },
+        Some(b) => ProviderMenuBlock {
+            title: format!("{} {} — ¥{:.2}", dot, p.alias, b.available_balance),
+            details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
+            extra_windows: vec![],
+        },
+        None if p.error.is_some() => ProviderMenuBlock {
+            title: format!("{} {} — 获取失败", dot, p.alias),
+            details: vec![],
+            extra_windows: vec![],
+        },
+        None => ProviderMenuBlock {
+            title: format!("{} {} — 无数据", dot, p.alias),
+            details: vec![],
+            extra_windows: vec![],
+        },
+    }
+}
+
+/// 供应商列表签名：name|alias|quota名序列。签名不变时托盘菜单只原地改写文案；
+/// quota 窗口数量/顺序变化（影响菜单结构）时触发整体重建。
 fn provider_signature(summary: &UsageSummary) -> String {
     summary
         .providers
         .iter()
-        .map(|p| format!("{}|{}", p.name, p.alias))
+        .map(|p| {
+            let quotas = p
+                .quota_infos
+                .as_ref()
+                .map(|qs| {
+                    qs.iter()
+                        .map(|q| q.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            format!("{}|{}|{}", p.name, p.alias, quotas)
+        })
         .collect::<Vec<_>>()
         .join(";")
 }
@@ -859,5 +1021,153 @@ mod tests {
         let p = make_status("Unknown", None, None);
         let line = format_provider_line(&p);
         assert!(line.contains("无数据"), "应包含无数据: {line}");
+    }
+
+    // ---------- provider_menu_block ----------
+
+    fn quota(name: &str, used: f64, reset_at: Option<&str>) -> crate::models::QuotaInfo {
+        crate::models::QuotaInfo {
+            name: name.into(),
+            used,
+            total: 100.0,
+            current_value: None,
+            remaining: Some(100.0 - used),
+            remaining_percent: 100.0 - used,
+            reset_time: None,
+            plan_label: None,
+            reset_at: reset_at.map(Into::into),
+        }
+    }
+
+    fn status_full(
+        name: &str,
+        alias: &str,
+        balance: Option<crate::models::BalanceData>,
+        quotas: Option<Vec<crate::models::QuotaInfo>>,
+        usage: Option<crate::models::UsageData>,
+    ) -> ProviderStatus {
+        ProviderStatus {
+            name: name.into(),
+            alias: alias.into(),
+            enabled: true,
+            balance,
+            usage,
+            error: None,
+            quota_infos: quotas,
+        }
+    }
+
+    fn fixed_now() -> chrono::DateTime<chrono::Utc> {
+        chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 31, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn percent_multi_window_block_has_title_primary_and_extras() {
+        let b = crate::models::BalanceData {
+            provider: "Claude Code".into(),
+            available_balance: 62.0,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 62.0,
+            currency: "%".into(),
+        };
+        let quotas = vec![
+            quota("5小时", 38.0, Some("2026-10-31T13:24:00Z")),
+            quota("7天", 19.0, Some("2026-11-04T00:00:00Z")),
+            quota("7天Opus", 5.0, None),
+        ];
+        let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
+        let block = provider_menu_block(&p, fixed_now());
+        assert_eq!(block.title, "🟢 Max工作 — 剩 62%");
+        assert_eq!(block.details.len(), 1);
+        assert_eq!(
+            block.details[0],
+            "  5小时 [████░░░░░░] 剩62% · 1小时24分后重置"
+        );
+        assert_eq!(block.extra_windows.len(), 2);
+        assert!(block.extra_windows[0].starts_with("  7天 [█"));
+    }
+
+    #[test]
+    fn percent_without_quota_degrades_to_title_only() {
+        let b = crate::models::BalanceData {
+            provider: "Zhipu".into(),
+            available_balance: 47.0,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 47.0,
+            currency: "%".into(),
+        };
+        let p = status_full("Zhipu", "智谱", Some(b), None, None);
+        let block = provider_menu_block(&p, fixed_now());
+        assert_eq!(block.title, "🟢 智谱 — 剩 47%");
+        assert!(block.details.is_empty() && block.extra_windows.is_empty());
+    }
+
+    #[test]
+    fn api_block_with_usage_gets_today_line() {
+        let b = crate::models::BalanceData {
+            provider: "DeepSeek".into(),
+            available_balance: 88.88,
+            voucher_balance: 10.0,
+            cash_balance: 78.88,
+            total_balance: 88.88,
+            currency: "CNY".into(),
+        };
+        let u = crate::models::UsageData {
+            provider: "DeepSeek".into(),
+            total_tokens: 1_234_567,
+            prompt_tokens: 1_000_000,
+            completion_tokens: 234_567,
+            today_cost: None,
+            today_requests: Some(42),
+        };
+        let p = status_full("DeepSeek", "DeepSeek", Some(b), None, Some(u));
+        let block = provider_menu_block(&p, fixed_now());
+        assert_eq!(block.title, "🟢 DeepSeek — ¥88.88");
+        assert_eq!(block.details, vec!["  今日 42次 · 1.2M tok"]);
+    }
+
+    #[test]
+    fn error_and_no_data_blocks() {
+        let mut p = status_full("Kimi", "Kimi", None, None, None);
+        p.error = Some("timeout".into());
+        assert_eq!(
+            provider_menu_block(&p, fixed_now()).title,
+            "🟡 Kimi — 获取失败"
+        );
+        let p2 = status_full("X", "X", None, None, None);
+        assert_eq!(provider_menu_block(&p2, fixed_now()).title, "🟢 X — 无数据");
+    }
+
+    #[test]
+    fn signature_includes_quota_names_in_order() {
+        let p = status_full(
+            "CC",
+            "a",
+            None,
+            Some(vec![quota("5小时", 38.0, None), quota("7天", 19.0, None)]),
+            None,
+        );
+        let s = UsageSummary {
+            providers: vec![p],
+            ..Default::default()
+        };
+        assert_eq!(provider_signature(&s), "CC|a|5小时,7天");
+        // 无 quota 的供应商签名为空尾巴（与旧行为兼容段）
+        let p2 = status_full("DS", "b", None, None, None);
+        let s2 = UsageSummary {
+            providers: vec![p2],
+            ..Default::default()
+        };
+        assert_eq!(provider_signature(&s2), "DS|b|");
+    }
+
+    #[test]
+    fn tokens_formatting() {
+        assert_eq!(format_tokens(980), "980");
+        assert_eq!(format_tokens(9_800), "9.8k");
+        assert_eq!(format_tokens(1_234_567), "1.2M");
+        assert_eq!(format_tokens(2_500_000_000), "2.5B");
     }
 }

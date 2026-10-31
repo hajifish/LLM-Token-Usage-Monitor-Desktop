@@ -6,6 +6,7 @@ pub mod deepseek;
 pub mod kimi;
 pub mod kimi_code;
 pub mod openai;
+pub mod qoder;
 pub mod zhipu;
 
 use crate::models::{BalanceData, QuotaInfo, UsageData};

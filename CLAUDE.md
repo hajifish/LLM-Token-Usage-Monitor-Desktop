@@ -8,9 +8,12 @@
 
 ## 版本号与发版机制（重要，勿凭直觉操作）
 
-- 静态版本号（package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json）是 **dev-only 元数据**：仅供本地开发构建展示。**不要**把它手工对齐到最新发布版本——真实版本号由 release.yml 构建时按 `v*` tag 总数派生：`0.(2+COUNT/256).(COUNT%256)`，全局只升不降（应用内更新按 semver 比较）。
-- 改静态版本号时 5 处必须一起改（CI 的 quality job 有一致性守卫，不一致即失败）。
-- auto-tag.yml 对每次 master push 自动创建日期 tag `vYYYY.MM.DD.N`（纯记账）。注意：它用 GITHUB_TOKEN 推 tag，**不会级联触发 release.yml**——发版需手动 `gh workflow run release.yml --ref <tag>`。
+- 版本号 = 发布 tag，格式必须是 `vX.Y.Z`（如 `v0.3.0`）。release.yml 构建时直接取 `${tag#v}` 写入 5 处清单；号段由人工决定，全局只升不降（应用内更新按 semver 比较）。
+- 发版流程：develop → master 合并 → 手动 `git tag vX.Y.Z && git push origin vX.Y.Z` → tag push 自动触发 release.yml → 等草稿 Release 构建完成 → 手动 publish。
+  - 不要再用「自动推 tag」的自动化（旧的 auto-tag.yml 已删除）：用 GITHUB_TOKEN 推的 tag **不会级联触发** release.yml。
+  - 兜底：tag 未能触发时 `gh workflow run release.yml --ref <tag>`。
+- 发布产物命名由 `scripts/normalize-release-assets.sh` 统一为 `TokenUsage-X.Y.Z-<arch>.<ext>`（Tauri 默认产出的是 `Token.Usage_X.Y.Z_aarch64.dmg` 这种带点的名字），latest.json 里的下载地址同步改写。产物集合变化时同步更新该脚本的映射表，否则发布会在 normalize 步骤直接失败。
+- 静态版本号（package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json）是 **dev-only 元数据**：仅供本地开发构建展示。**不要**把它手工对齐到最新发布版本。改静态版本号时 5 处必须一起改（CI 的 quality job 有一致性守卫，不一致即失败）。
 - 发布草稿（draft Release）是更新分发闸门：手动 publish 后 `releases/latest/download/latest.json` 才对外可见。
 - 应用内更新语义：更新只升不降；debug 构建跳过自动检查且拒绝安装（设计如此）。
 - 更新签名密钥：公钥在 tauri.conf.json，私钥在仓库 Secrets（`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）。私钥丢失 = 全部存量用户无法再收到更新。

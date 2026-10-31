@@ -133,7 +133,6 @@ fn tray_value(p: &ProviderStatus) -> String {
 }
 
 /// 解析 ISO/RFC3339 重置时刻为距 now 的剩余时长；解析失败或已到期返回 None
-/// 当前仅测试消费（Task 3 菜单行 / Task 5 聚合标题将接入），非测试构建允许暂未使用。
 pub fn reset_remaining(iso: &str, now: DateTime<Utc>) -> Option<chrono::Duration> {
     let dt = iso.parse::<DateTime<Utc>>().ok()?;
     let d = dt.signed_duration_since(now);
@@ -164,8 +163,6 @@ pub fn countdown_menu(d: chrono::Duration) -> String {
 }
 
 /// 菜单栏紧凑倒计时，输入为正时长
-/// Task 5（V3 聚合标题）接线前，bin 构建暂不可达，允许暂未使用。
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn countdown_compact(d: chrono::Duration) -> String {
     let mins = d.num_minutes().max(1);
     if mins < 60 {
@@ -187,7 +184,7 @@ pub fn quota_countdown_menu(q: &crate::models::QuotaInfo, now: DateTime<Utc>) ->
 }
 
 /// QuotaInfo 倒计时（菜单栏紧凑格式）：同上回退策略
-/// Task 5（V3 聚合标题）接线前，bin 构建暂不可达，允许暂未使用。
+/// 当前仅测试消费（紧凑菜单行未接入），非测试构建允许暂未使用。
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
     q.reset_at
@@ -241,13 +238,42 @@ fn provider_show_in_tray(config: &AppConfig, p: &ProviderStatus) -> bool {
         .unwrap_or(true)
 }
 
-/// 构建状态栏常显文字；全局关闭或无可展示服务商时返回 None（托盘回退纯图标）。
-/// 展示名 = 类型短码（已收录类型）；同短码的多个账号依次追加序号（DS、DS2）区分。
+/// V3 聚合主值：percent 型取主窗口剩余%（无 quota 回退 balance）；API 型取余额；
+/// 无数据返回 f64::MAX（排序垫底）
+fn aggregate_value(p: &ProviderStatus) -> f64 {
+    let Some(b) = &p.balance else {
+        return f64::MAX;
+    };
+    if b.is_percent() {
+        if let Some(primary) = p.quota_infos.as_ref().and_then(|qs| primary_quota(qs)) {
+            return primary.remaining_percent;
+        }
+    }
+    b.available_balance
+}
+
+fn aggregate_is_percent(p: &ProviderStatus) -> bool {
+    p.balance.as_ref().map(|b| b.is_percent()).unwrap_or(false)
+}
+
+/// 聚合并列时的主窗口重置时刻（Unix 秒；无则 i64::MAX）
+fn p_reset_ts(p: &ProviderStatus) -> i64 {
+    p.quota_infos
+        .as_ref()
+        .and_then(|qs| primary_quota(qs))
+        .map(reset_timestamp)
+        .unwrap_or(i64::MAX)
+}
+
+/// 构建状态栏常显文字（V3 聚合态）：只显示最紧张的一项。
+/// 排序：告警等级降序 → percent 型在前 → 主值升序 → 主窗口重置更近在前。
+/// 告警字符沿用 ⚠️（PR #61 机制）；候选仅含可见供应商，被隐藏项的告警由图标红点承担。
 pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<String> {
     if !config.tray_text_enabled {
         return None;
     }
-    let visible: Vec<&ProviderStatus> = summary
+    let now = Utc::now();
+    let mut visible: Vec<&ProviderStatus> = summary
         .providers
         .iter()
         .filter(|p| p.enabled && provider_show_in_tray(config, p))
@@ -255,33 +281,44 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
     if visible.is_empty() {
         return None;
     }
-    let mut code_counts: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    let parts: Vec<String> = visible
-        .iter()
-        .map(|p| {
-            let base = tray_short_code(&p.name)
-                .map(str::to_string)
-                .unwrap_or_else(|| fallback_short_name(&p.alias));
-            let n = code_counts.entry(base.clone()).or_insert(0);
-            *n += 1;
-            let code = if *n == 1 {
-                base
-            } else {
-                format!("{}{}", base, n)
-            };
-            format!("{} {}", code, tray_value(p))
+    visible.sort_by(|a, b| {
+        crate::tray::provider_warning_level(b)
+            .cmp(&crate::tray::provider_warning_level(a))
+            .then_with(|| aggregate_is_percent(b).cmp(&aggregate_is_percent(a)))
+            .then_with(|| {
+                aggregate_value(a)
+                    .partial_cmp(&aggregate_value(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| {
+                let ta = p_reset_ts(a);
+                let tb = p_reset_ts(b);
+                ta.cmp(&tb)
+            })
+    });
+    let p = visible[0];
+    let code = tray_short_code(&p.name)
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback_short_name(&p.alias));
+    let body = match &p.balance {
+        Some(b) if b.is_percent() => format!("{} {:.0}%", code, aggregate_value(p)),
+        _ => format!("{} {}", code, tray_value(p)),
+    };
+    if provider_warning_level(p) > 0 {
+        let cd = p
+            .quota_infos
+            .as_ref()
+            .and_then(|qs| primary_quota(qs))
+            .and_then(|q| q.reset_at.as_deref())
+            .and_then(|iso| reset_remaining(iso, now))
+            .map(countdown_compact);
+        Some(match cd {
+            Some(c) => format!("⚠️ {} · {}", body, c),
+            None => format!("⚠️ {}", body),
         })
-        .collect();
-    Some(parts.join(" · ")).map(|title| {
-        // 文字模式下图标被隐藏（set_icon(None)），红/黄告警打点不可见；
-        // 余量告警触发时在标题前统一加 ⚠️ 前缀（红黄不再区分），避免告警能力回归为死代码
-        if worst_warning(summary) > 0 {
-            format!("⚠️ {}", title)
-        } else {
-            title
-        }
-    })
+    } else {
+        Some(body)
+    }
 }
 
 /// Overlay a colored dot (red/yellow) on the tray icon when any provider is low/empty.
@@ -430,6 +467,37 @@ mod tray_title_tests {
         }
     }
 
+    /// 带 quota_infos 的状态（V3 聚合测试用）；name/alias 同为 alias，可再覆写 name
+    fn status_q(
+        alias: &str,
+        balance: Option<BalanceData>,
+        quotas: Option<Vec<crate::models::QuotaInfo>>,
+    ) -> ProviderStatus {
+        ProviderStatus {
+            name: alias.to_string(),
+            alias: alias.to_string(),
+            enabled: true,
+            balance,
+            usage: None,
+            error: None,
+            quota_infos: quotas,
+        }
+    }
+
+    fn quota(name: &str, remaining: f64, reset_at: Option<&str>) -> crate::models::QuotaInfo {
+        crate::models::QuotaInfo {
+            name: name.into(),
+            used: 100.0 - remaining,
+            total: 100.0,
+            current_value: None,
+            remaining: Some(remaining),
+            remaining_percent: remaining,
+            reset_time: None,
+            plan_label: None,
+            reset_at: reset_at.map(Into::into),
+        }
+    }
+
     fn pconfig(name: &str, alias: Option<&str>, show_in_tray: bool) -> ProviderConfig {
         ProviderConfig {
             name: name.to_string(),
@@ -471,6 +539,8 @@ mod tray_title_tests {
 
     #[test]
     fn title_joins_mixed_segments_with_separator() {
+        // V3 聚合态：只显最紧张一项。三者均无告警 → percent 型在前、剩余最低者居首
+        // （智谱 70% percent 型 > API 型 DS/OA），故标题只剩智谱一段，不再用 · 拼接
         let s = UsageSummary {
             providers: vec![
                 status("智谱", Some(balance(70.0, "%")), None),
@@ -479,10 +549,7 @@ mod tray_title_tests {
             ],
             ..Default::default()
         };
-        assert_eq!(
-            build_tray_title(&config(vec![]), &s).unwrap(),
-            "智谱 70% · DS ¥88.88 · OA $12.34"
-        );
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "智谱 70%");
     }
 
     #[test]
@@ -549,13 +616,15 @@ mod tray_title_tests {
             providers: vec![work, home],
             ..Default::default()
         };
-        // 私人号 ¥5 触发黄档告警（worst_warning 覆盖全部供应商，与图标打点同语义）→ 标题加 ⚠️
-        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "⚠️ DS ¥88.00");
+        // V3 告警只看可见候选：私人号（show_in_tray=false）被隐藏，其 ¥5 告警
+        // 不再给标题抢 ⚠️ 前缀，由图标红点（worst_warning/update_tray_badge）承担
+        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "DS ¥88.00");
     }
 
     #[test]
     fn duplicate_visible_accounts_get_index_suffix() {
-        // 同类型两个账号同时展示：第二个起追加序号区分（DS、DS2）
+        // V3 聚合态：两账号均可见且都黄档（¥5 < 10）→ 告警同级、API 型、主值升序
+        // → ¥5.00 居首；单条展示无歧义，第一名用基础短码不再追加序号（无 DS2）
         let mut a = status("工作号", Some(balance(88.0, "CNY")), None);
         a.name = "DeepSeek".into();
         let mut b = status("私人号", Some(balance(5.0, "CNY")), None);
@@ -567,7 +636,7 @@ mod tray_title_tests {
         // ¥5 黄档告警 → 标题加 ⚠️ 前缀
         assert_eq!(
             build_tray_title(&config(vec![]), &s).unwrap(),
-            "⚠️ DS ¥88.00 · DS2 ¥5.00"
+            "⚠️ DS ¥5.00"
         );
     }
 
@@ -694,6 +763,50 @@ mod tray_title_tests {
             ..Default::default()
         };
         assert_eq!(build_tray_title(&cfg, &s), None);
+    }
+
+    #[test]
+    fn v3_alert_with_compact_countdown() {
+        // Codex 5h 剩 3%（<5 触发黄档）→ ⚠️ 前缀 + 紧凑倒计时（取主窗口 reset_at）
+        let qs = vec![quota("5小时", 3.0, Some("2026-10-31T12:12:00Z"))];
+        let mut p = status_q("Codex", Some(balance(3.0, "%")), Some(qs));
+        p.name = "Codex".into();
+        let s = UsageSummary {
+            providers: vec![p],
+            ..Default::default()
+        };
+        // 依赖系统时钟的倒计时断言不稳定 → 断言前缀与主值，倒计时格式由 countdown 测试覆盖：
+        let title = build_tray_title(&config(vec![]), &s).unwrap();
+        assert!(title.starts_with("⚠️ CX 3%"), "got: {title}");
+    }
+
+    #[test]
+    fn v3_calm_shows_lowest_percent_no_prefix() {
+        let mut cc = status_q(
+            "CC",
+            Some(balance(62.0, "%")),
+            Some(vec![quota("5小时", 62.0, None)]),
+        );
+        cc.name = "Claude Code".into();
+        let ds = status("DeepSeek", Some(balance(88.0, "CNY")), None); // 现有辅助
+        let mut ds = ds;
+        ds.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![cc, ds],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "CC 62%");
+    }
+
+    #[test]
+    fn v3_api_only_falls_back_to_balance() {
+        let mut ds = status("工作号", Some(balance(88.0, "CNY")), None);
+        ds.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![ds],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "DS ¥88.00");
     }
 }
 

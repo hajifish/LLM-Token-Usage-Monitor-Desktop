@@ -42,6 +42,9 @@ pub fn run() {
         ))
         // 应用内自动更新：端点与公钥在 tauri.conf.json 的 plugins.updater 中配置
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // 更新检查结果经系统通知反馈（通知驻留通知中心，避免托盘菜单收起后
+        // 结果一闪而过）；macOS 首次投递时系统会自行弹授权询问
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             tray::create_tray(app.handle())?;
             let (app_config, config_health) = config::load(app.handle());

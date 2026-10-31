@@ -12,9 +12,10 @@ export function useUsage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 注意：fetchUsage 内不做同步 setState（首行为即 await），
+  // 否则触发 react-hooks/set-state-in-effect；清错误由 refresh 负责
   const fetchUsage = useCallback(async () => {
     try {
-      setError(null);
       const data = await invoke<UsageSummary>('get_usage');
       setSummary(data);
     } catch (e) {
@@ -26,6 +27,7 @@ export function useUsage() {
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
+    setError(null);
     try {
       // 先注册一次性事件监听，确保不遗漏后端发出的 usage-updated
       const eventPromise = new Promise<UsageSummary>((resolve) => {
@@ -55,7 +57,20 @@ export function useUsage() {
   }, [fetchUsage]);
 
   useEffect(() => {
-    fetchUsage();
+    // 初始加载用 promise 回调而非直接调用 fetchUsage：
+    // 满足 react-hooks/set-state-in-effect（setState 仅出现在回调中），
+    // 并通过 active 标记避免卸载后的 setState
+    let active = true;
+    invoke<UsageSummary>('get_usage')
+      .then((data) => {
+        if (active) setSummary(data);
+      })
+      .catch((e) => {
+        if (active) setError(String(e));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     const unlisten = listen<UsageSummary>('usage-updated', (event) => {
       setSummary(event.payload);
@@ -63,9 +78,10 @@ export function useUsage() {
     });
 
     return () => {
+      active = false;
       unlisten.then((fn) => fn());
     };
-  }, [fetchUsage]);
+  }, []);
 
   return { summary, loading, refreshing, error, refresh };
 }

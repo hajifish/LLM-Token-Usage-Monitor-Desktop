@@ -95,8 +95,24 @@ pub fn worst_warning(summary: &UsageSummary) -> u8 {
         .unwrap_or(0)
 }
 
-/// 短名：alias 已由 scheduler 回退为原名；超过 8 字符截为 7 字符（去尾部空白）+ …
-fn tray_short_name(alias: &str) -> String {
+/// 服务商类型的菜单栏短代码（1-2 字母，按用户可读性约定）。
+/// 未收录的类型返回 None，回退到别名前缀截断。
+fn tray_short_code(name: &str) -> Option<&'static str> {
+    match name {
+        "Zhipu" => Some("Z"),
+        "Kimi API" => Some("K"),
+        "Kimi Code" => Some("KC"),
+        "DeepSeek" => Some("DS"),
+        "OpenAI" => Some("OA"),
+        "Codex" => Some("CX"),
+        "Anthropic" => Some("A"),
+        "Claude Code" => Some("CC"),
+        _ => None,
+    }
+}
+
+/// 回退短名（仅未收录类型）：超 8 字符截为 7 字符（去尾部空白）+ …
+fn fallback_short_name(alias: &str) -> String {
     let count = alias.chars().count();
     if count <= 8 {
         return alias.to_string();
@@ -105,14 +121,13 @@ fn tray_short_name(alias: &str) -> String {
     format!("{}…", truncated.trim_end())
 }
 
-/// 状态栏片段：短名 + 主指标值；无数据/出错显示「短名 –」
-fn tray_segment(p: &ProviderStatus) -> String {
-    let name = tray_short_name(&p.alias);
+/// 状态栏片段的指标值部分；无数据/出错显示「–」
+fn tray_value(p: &ProviderStatus) -> String {
     match &p.balance {
-        Some(b) if b.is_percent() => format!("{} {:.0}%", name, b.available_balance),
-        Some(b) if b.is_usd() => format!("{} ${:.2}", name, b.available_balance),
-        Some(b) => format!("{} ¥{:.2}", name, b.available_balance),
-        None => format!("{} –", name),
+        Some(b) if b.is_percent() => format!("{:.0}%", b.available_balance),
+        Some(b) if b.is_usd() => format!("${:.2}", b.available_balance),
+        Some(b) => format!("¥{:.2}", b.available_balance),
+        None => "–".to_string(),
     }
 }
 
@@ -138,21 +153,38 @@ fn provider_show_in_tray(config: &AppConfig, p: &ProviderStatus) -> bool {
 }
 
 /// 构建状态栏常显文字；全局关闭或无可展示服务商时返回 None（托盘回退纯图标）。
+/// 展示名 = 类型短码（已收录类型）；同短码的多个账号依次追加序号（DS、DS2）区分。
 pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<String> {
     if !config.tray_text_enabled {
         return None;
     }
-    let parts: Vec<String> = summary
+    let visible: Vec<&ProviderStatus> = summary
         .providers
         .iter()
         .filter(|p| p.enabled && provider_show_in_tray(config, p))
-        .map(tray_segment)
         .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" · "))
+    if visible.is_empty() {
+        return None;
     }
+    let mut code_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let parts: Vec<String> = visible
+        .iter()
+        .map(|p| {
+            let base = tray_short_code(&p.name)
+                .map(str::to_string)
+                .unwrap_or_else(|| fallback_short_name(&p.alias));
+            let n = code_counts.entry(base.clone()).or_insert(0);
+            *n += 1;
+            let code = if *n == 1 {
+                base
+            } else {
+                format!("{}{}", base, n)
+            };
+            format!("{} {}", code, tray_value(p))
+        })
+        .collect();
+    Some(parts.join(" · "))
 }
 
 /// Overlay a colored dot (red/yellow) on the tray icon when any provider is low/empty.
@@ -369,7 +401,7 @@ mod tray_title_tests {
         };
         assert_eq!(
             build_tray_title(&config(vec![]), &s).unwrap(),
-            "智谱 70% · DeepSeek ¥88.88 · OpenAI $12.34"
+            "智谱 70% · DS ¥88.88 · OA $12.34"
         );
     }
 
@@ -423,7 +455,7 @@ mod tray_title_tests {
 
     #[test]
     fn same_name_accounts_matched_by_alias() {
-        // 同类型两个账号，仅关闭其中一个
+        // 同类型两个账号，仅关闭其中一个；展示名用类型短码，alias 不再进菜单栏
         let cfg = config(vec![
             pconfig("DeepSeek", Some("工作号"), true),
             pconfig("DeepSeek", Some("私人号"), false),
@@ -437,32 +469,79 @@ mod tray_title_tests {
             providers: vec![work, home],
             ..Default::default()
         };
-        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "工作号 ¥88.00");
+        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "DS ¥88.00");
     }
 
     #[test]
-    fn long_alias_truncated_to_seven_chars_plus_ellipsis() {
-        // "Claude Code"（11 字符）→ 截 7 字符去尾空格 + …
+    fn duplicate_visible_accounts_get_index_suffix() {
+        // 同类型两个账号同时展示：第二个起追加序号区分（DS、DS2）
+        let mut a = status("工作号", Some(balance(88.0, "CNY")), None);
+        a.name = "DeepSeek".into();
+        let mut b = status("私人号", Some(balance(5.0, "CNY")), None);
+        b.name = "DeepSeek".into();
+        let s = UsageSummary {
+            providers: vec![a, b],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "DS ¥88.00 · DS2 ¥5.00"
+        );
+    }
+
+    #[test]
+    fn provider_types_map_to_short_codes() {
+        // 8 种内置类型的短码映射
+        let cases = [
+            ("Zhipu", "Z"),
+            ("Kimi API", "K"),
+            ("Kimi Code", "KC"),
+            ("DeepSeek", "DS"),
+            ("OpenAI", "OA"),
+            ("Codex", "CX"),
+            ("Anthropic", "A"),
+            ("Claude Code", "CC"),
+        ];
+        for (name, code) in cases {
+            let mut p = status(name, Some(balance(70.0, "%")), None);
+            p.name = name.into();
+            let s = UsageSummary {
+                providers: vec![p],
+                ..Default::default()
+            };
+            assert_eq!(
+                build_tray_title(&config(vec![]), &s).unwrap(),
+                format!("{} 70%", code),
+                "类型 {} 应映射为短码 {}",
+                name,
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn known_type_uses_short_code_even_if_long() {
+        // "Claude Code" 是已收录类型 → 用短码 CC，不走截断
         let s = UsageSummary {
             providers: vec![status("Claude Code", Some(balance(70.0, "%")), None)],
             ..Default::default()
         };
         assert_eq!(
             build_tray_title(&config(vec![]), &s).unwrap(),
-            "Claude… 70%"
+            "CC 70%"
         );
     }
 
     #[test]
-    fn eight_char_alias_not_truncated() {
-        // "Kimi API" 恰 8 字符（K,i,m,i,空格,A,P,I）→ 不截断
+    fn fallback_long_unknown_name_truncated() {
+        // 未收录类型回退到别名截断：超 8 字符截前 7 字符 + …
         let s = UsageSummary {
-            providers: vec![status("Kimi API", Some(balance(70.0, "%")), None)],
+            providers: vec![status("SomeUnknownProvider", Some(balance(70.0, "%")), None)],
             ..Default::default()
         };
         assert_eq!(
             build_tray_title(&config(vec![]), &s).unwrap(),
-            "Kimi API 70%"
+            "SomeUnk… 70%"
         );
     }
 

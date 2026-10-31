@@ -276,6 +276,11 @@ async fn poll_providers(
                     });
                 }
             }
+            // reqwest 异步 Client 的 Drop 会等待连接池收敛，在代理/热点等
+            // 连接僵死的环境下可能无限阻塞（采样证实卡在 ClientRef::drop_slow
+            // 的 Condvar 上），且 Drop 不受请求超时保护。卸载到阻塞线程池执行，
+            // 调度任务与后续轮询不受池收敛速度影响。
+            tauri::async_runtime::spawn_blocking(move || drop(provider));
         }
     }
 

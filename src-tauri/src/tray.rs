@@ -185,6 +185,15 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
         })
         .collect();
     Some(parts.join(" · "))
+        .map(|title| {
+        // 文字模式下图标被隐藏（set_icon(None)），红/黄告警打点不可见；
+        // 余量告警触发时在标题前统一加 ⚠️ 前缀（红黄不再区分），避免告警能力回归为死代码
+        if worst_warning(summary) > 0 {
+            format!("⚠️ {}", title)
+        } else {
+            title
+        }
+    })
 }
 
 /// Overlay a colored dot (red/yellow) on the tray icon when any provider is low/empty.
@@ -455,7 +464,8 @@ mod tray_title_tests {
             providers: vec![work, home],
             ..Default::default()
         };
-        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "DS ¥88.00");
+        // 私人号 ¥5 触发黄档告警（worst_warning 覆盖全部供应商，与图标打点同语义）→ 标题加 ⚠️
+        assert_eq!(build_tray_title(&cfg, &s).unwrap(), "⚠️ DS ¥88.00");
     }
 
     #[test]
@@ -469,9 +479,10 @@ mod tray_title_tests {
             providers: vec![a, b],
             ..Default::default()
         };
+        // ¥5 黄档告警 → 标题加 ⚠️ 前缀
         assert_eq!(
             build_tray_title(&config(vec![]), &s).unwrap(),
-            "DS ¥88.00 · DS2 ¥5.00"
+            "⚠️ DS ¥88.00 · DS2 ¥5.00"
         );
     }
 
@@ -542,6 +553,38 @@ mod tray_title_tests {
             build_tray_title(&config(vec![]), &s).unwrap(),
             "智谱清言助手测… 70%"
         );
+    }
+
+    #[test]
+    fn warning_prefix_shown_when_level_one() {
+        // 余量告警（黄）：文字模式下标题加 ⚠️ 前缀（红黄不再区分，统一警示符）
+        let s = UsageSummary {
+            providers: vec![status("智谱", Some(balance(3.0, "%")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "⚠️ 智谱 3%");
+    }
+
+    #[test]
+    fn warning_prefix_shown_when_level_two() {
+        // 余量耗尽（红）：同样加 ⚠️ 前缀
+        let s = UsageSummary {
+            providers: vec![status("DeepSeek", Some(balance(0.0, "CNY")), None)],
+            ..Default::default()
+        };
+        assert_eq!(
+            build_tray_title(&config(vec![]), &s).unwrap(),
+            "⚠️ DS ¥0.00"
+        );
+    }
+
+    #[test]
+    fn no_warning_prefix_when_level_zero() {
+        let s = UsageSummary {
+            providers: vec![status("DeepSeek", Some(balance(88.88, "CNY")), None)],
+            ..Default::default()
+        };
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "DS ¥88.88");
     }
 
     #[test]

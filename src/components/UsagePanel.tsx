@@ -10,6 +10,7 @@ const BRAND_LOGOS: Record<string, string> = {
   Codex: '/providers/openai.png',
   'Claude Code': '/providers/anthropic.png',
   'Kimi Code': '/providers/kimi.png',
+  Qoder: '/providers/qoder.png',
 };
 
 function BrandLogo({ name }: { name: string }) {

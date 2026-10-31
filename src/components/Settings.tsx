@@ -18,6 +18,7 @@ const PROVIDER_OPTIONS = [
   { value: 'Kimi API', label: 'Kimi API' },
   { value: 'Kimi Code', label: 'Kimi Code' },
   { value: 'Zhipu', label: '智谱' },
+  { value: 'Qoder', label: 'Qoder' },
 ];
 
 /** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */

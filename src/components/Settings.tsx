@@ -118,12 +118,6 @@ function Settings({ onBack }: SettingsProps) {
   const refreshHealth = () =>
     invoke<ConfigHealth>('get_config_health').then(setHealth).catch(console.error);
 
-  /**
-   * 重新拉取配置。「忽略版本」由后端直接落盘，本页的 config 快照会因此过期，
-   * 若之后点「保存」会把过期的忽略记录写回去，因此操作后必须重新拉取。
-   */
-  const refreshConfig = () => invoke<AppConfig>('get_config').then(setConfig).catch(console.error);
-
   useEffect(() => {
     let alive = true;
     // 并行拉取配置与健康状态；健康状态获取失败不阻塞设置页使用
@@ -225,7 +219,6 @@ function Settings({ onBack }: SettingsProps) {
         <button className="back-btn" onClick={onBack}>
           ← 返回
         </button>
-        <h2>设置</h2>
         <button className="save-btn-header" onClick={handleSave} disabled={saving}>
           {saving ? '保存中...' : '保存'}
         </button>
@@ -452,7 +445,7 @@ function Settings({ onBack }: SettingsProps) {
               </label>
             </div>
             <span className="update-hint">
-              启动 60 秒后首次检查，此后每 24 小时一次；关闭后仍可手动检查。
+              启动 60 秒后首次检查，此后每小时一次；关闭后仍可手动检查。
             </span>
 
             {update.status?.phase === 'downloading' && <UpdateProgress status={update.status} />}
@@ -477,20 +470,7 @@ function Settings({ onBack }: SettingsProps) {
             )}
 
             <div className="update-actions">
-              {update.status && (
-                <UpdateActions status={update.status} api={update} onSkipChanged={refreshConfig} />
-              )}
-              {config.skipped_update_version && (
-                <button
-                  className="update-btn ghost"
-                  onClick={async () => {
-                    await update.setSkipped(null);
-                    refreshConfig();
-                  }}
-                >
-                  取消忽略 v{config.skipped_update_version}
-                </button>
-              )}
+              {update.status && <UpdateActions status={update.status} api={update} />}
             </div>
 
             {update.status && (

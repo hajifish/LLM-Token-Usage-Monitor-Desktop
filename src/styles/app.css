@@ -481,6 +481,7 @@
   font-size: 12px;
   padding: 5px 14px;
   transition: all 0.15s;
+  margin-left: auto;
 }
 .save-btn-header:hover { background: #0070e0; }
 .save-btn-header:disabled { opacity: 0.5; cursor: not-allowed; }

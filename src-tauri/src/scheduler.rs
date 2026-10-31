@@ -322,7 +322,9 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 let _ = tray.set_icon(None);
             }
             None => {
-                let _ = tray.set_title(None::<&str>);
+                // 注意：tray-icon 的 set_title(None) 是静默无操作（不会清空按钮
+                // 标题），必须传空字符串才能真正清掉旧文字
+                let _ = tray.set_title(Some(""));
                 crate::tray::update_tray_badge(app_handle, summary);
             }
         }

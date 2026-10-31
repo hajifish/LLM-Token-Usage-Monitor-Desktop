@@ -134,7 +134,6 @@ fn tray_value(p: &ProviderStatus) -> String {
 
 /// 解析 ISO/RFC3339 重置时刻为距 now 的剩余时长；解析失败或已到期返回 None
 /// 当前仅测试消费（Task 3 菜单行 / Task 5 聚合标题将接入），非测试构建允许暂未使用。
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn reset_remaining(iso: &str, now: DateTime<Utc>) -> Option<chrono::Duration> {
     let dt = iso.parse::<DateTime<Utc>>().ok()?;
     let d = dt.signed_duration_since(now);
@@ -142,7 +141,6 @@ pub fn reset_remaining(iso: &str, now: DateTime<Utc>) -> Option<chrono::Duration
 }
 
 /// 菜单明细行倒计时（自然语言），输入为正时长
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn countdown_menu(d: chrono::Duration) -> String {
     let mins = d.num_minutes().max(1);
     if mins < 60 {
@@ -166,6 +164,7 @@ pub fn countdown_menu(d: chrono::Duration) -> String {
 }
 
 /// 菜单栏紧凑倒计时，输入为正时长
+/// Task 5（V3 聚合标题）接线前，bin 构建暂不可达，允许暂未使用。
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn countdown_compact(d: chrono::Duration) -> String {
     let mins = d.num_minutes().max(1);
@@ -179,7 +178,6 @@ pub fn countdown_compact(d: chrono::Duration) -> String {
 }
 
 /// QuotaInfo 倒计时（菜单格式）：reset_at 精确换算，缺失/解析失败回退 reset_time 原文
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn quota_countdown_menu(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
     q.reset_at
         .as_deref()
@@ -189,6 +187,7 @@ pub fn quota_countdown_menu(q: &crate::models::QuotaInfo, now: DateTime<Utc>) ->
 }
 
 /// QuotaInfo 倒计时（菜单栏紧凑格式）：同上回退策略
+/// Task 5（V3 聚合标题）接线前，bin 构建暂不可达，允许暂未使用。
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
     q.reset_at
@@ -200,7 +199,6 @@ pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>)
 
 /// 订阅计划多窗口中的主窗口：剩余百分比最低者；
 /// 差 <0.5 视为并列，取重置时刻更近者；无 reset_at 的排最后
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn primary_quota(quotas: &[crate::models::QuotaInfo]) -> Option<&crate::models::QuotaInfo> {
     quotas.iter().min_by(|a, b| {
         if (a.remaining_percent - b.remaining_percent).abs() >= 0.5 {
@@ -214,7 +212,6 @@ pub fn primary_quota(quotas: &[crate::models::QuotaInfo]) -> Option<&crate::mode
 }
 
 /// 重置时刻换算为 Unix 秒（并列时比远近用）；缺失/解析失败视为最远
-#[cfg_attr(not(test), allow(dead_code))]
 fn reset_timestamp(q: &crate::models::QuotaInfo) -> i64 {
     q.reset_at
         .as_deref()

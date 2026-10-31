@@ -1,5 +1,5 @@
 use crate::config::ConfigHealth;
-use crate::models::{AppConfig, BalanceData, ProviderStatus, QuotaInfo, UsageData, UsageSummary};
+use crate::models::{AppConfig, ProviderStatus, QuotaInfo, UsageData, UsageSummary};
 use crate::providers;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
@@ -27,48 +27,7 @@ fn status_dot(level: u8) -> &'static str {
     }
 }
 
-/// 从 BalanceData 计算已用百分比（仅百分比类型有意义）
-fn used_percent(b: &BalanceData) -> f64 {
-    if b.is_percent() {
-        (100.0 - b.available_balance).clamp(0.0, 100.0)
-    } else {
-        0.0
-    }
-}
-
-/// 格式化单个供应商为紧凑单行文本
-fn format_provider_line(p: &ProviderStatus) -> String {
-    let dot = status_dot(crate::tray::provider_warning_level(p));
-    if let Some(ref balance) = p.balance {
-        if balance.is_percent() {
-            let remaining = balance.available_balance;
-            let used = used_percent(balance);
-            let bar = progress_bar(used, 10);
-            format!(
-                "{} {}  {:.0}%  {}  剩余 {:.0}%",
-                dot, p.alias, used, bar, remaining
-            )
-        } else if balance.is_usd() {
-            format!(
-                "{} {}  ${:.2}  本月花费",
-                dot, p.alias, balance.available_balance
-            )
-        } else {
-            format!(
-                "{} {}  ¥{:.2}  可用",
-                dot, p.alias, balance.available_balance
-            )
-        }
-    } else if p.error.is_some() {
-        format!("{} {}  获取失败", dot, p.alias)
-    } else {
-        format!("{} {}  无数据", dot, p.alias)
-    }
-}
-
 /// 一个供应商的托盘菜单块：标题行 + 明细行 + 折叠窗口行（非空时渲染「其余 N 个窗口」子菜单）
-/// Task 4 接入 update_tray_menu 前，bin 构建暂不可达（同 tray.rs 顶部 Task 2 惯例）。
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct ProviderMenuBlock {
     pub title: String,
     pub details: Vec<String>,
@@ -76,13 +35,11 @@ pub(crate) struct ProviderMenuBlock {
 }
 
 /// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
-#[cfg_attr(not(test), allow(dead_code))]
 const DETAIL_INDENT: &str = "  ";
 
 /// 菜单块状态点：沿用告警级别规则；数据获取失败（无 balance）显示黄点，
 /// 与「无数据」的绿点区分（provider_warning_level 对 balance=None 一律 0，
 /// 该规则同时被状态栏/图标告警消费，不宜为本处单独放宽）
-#[cfg_attr(not(test), allow(dead_code))]
 fn block_dot(p: &ProviderStatus) -> &'static str {
     let level = if p.balance.is_none() && p.error.is_some() {
         1
@@ -93,7 +50,6 @@ fn block_dot(p: &ProviderStatus) -> &'static str {
 }
 
 /// 单个 quota 窗口的菜单明细行：缩进 + 名称 + 进度条 + 剩余%，有倒计时时追加
-#[cfg_attr(not(test), allow(dead_code))]
 fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
     let used_pct = if q.total > 0.0 {
         q.used / q.total * 100.0
@@ -114,7 +70,6 @@ fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
 }
 
 /// token 数人性化：980 / 9.8k / 1.2M / 2.5B
-#[cfg_attr(not(test), allow(dead_code))]
 fn format_tokens(n: u64) -> String {
     let unit = if n >= 1_000_000_000 {
         (1_000_000_000, "B")
@@ -134,7 +89,6 @@ fn format_tokens(n: u64) -> String {
 }
 
 /// 今日用量明细行（花费/次数/token 有其一才返回）
-#[cfg_attr(not(test), allow(dead_code))]
 fn usage_line(u: &UsageData) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(cost) = u.today_cost {
@@ -155,7 +109,6 @@ fn usage_line(u: &UsageData) -> Option<String> {
 
 /// 供应商 → 菜单块。percent 型消费 quota_infos（标题主指标取主窗口 remaining_percent，
 /// 主窗口选择复用 tray::primary_quota 规则）；API 型标题为余额、有 usage 时加今日明细行
-#[cfg_attr(not(test), allow(dead_code))]
 fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBlock {
     let dot = block_dot(p);
     let percent_quota = p
@@ -317,9 +270,16 @@ pub struct TrayMenuState {
     inner: std::sync::Mutex<Option<TrayMenuHandles>>,
 }
 
+/// 单个供应商块的菜单条目句柄：标题行 + 明细行 + 折叠窗口子菜单（非空时存在）
+struct ProviderMenuHandles {
+    title: MenuItem<Wry>,
+    details: Vec<MenuItem<Wry>>,
+    extra: Option<(Submenu<Wry>, Vec<MenuItem<Wry>>)>,
+}
+
 #[derive(Default)]
 struct TrayMenuHandles {
-    provider_items: Vec<MenuItem<Wry>>,
+    provider_blocks: Vec<ProviderMenuHandles>,
     time_item: Option<MenuItem<Wry>>,
     interval_items: Vec<(u64, CheckMenuItem<Wry>)>,
     signature: String,
@@ -566,8 +526,18 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(handles) = inner.as_mut() {
                 if handles.signature == signature {
-                    for (item, p) in handles.provider_items.iter().zip(summary.providers.iter()) {
-                        let _ = item.set_text(format_provider_line(p));
+                    let now = Utc::now();
+                    for (block, p) in handles.provider_blocks.iter().zip(summary.providers.iter()) {
+                        let b = provider_menu_block(p, now);
+                        let _ = block.title.set_text(b.title);
+                        for (item, text) in block.details.iter().zip(b.details.iter()) {
+                            let _ = item.set_text(text);
+                        }
+                        if let Some((_, extra_items)) = &block.extra {
+                            for (item, text) in extra_items.iter().zip(b.extra_windows.iter()) {
+                                let _ = item.set_text(text);
+                            }
+                        }
                     }
                     if let Some(time_item) = &handles.time_item {
                         let _ = time_item.set_text(format!("更新于 {}", update_time_text(summary)));
@@ -590,32 +560,70 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 否则会装上缺少"退出"的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
         let mut critical_ok = true;
 
-        // 1) 供应商状态条目（disabled，不可点击），上限 50 条；id 加序号防别名重复冲突
-        const MAX_PROVIDER_ITEMS: usize = 50;
-        let mut provider_items = Vec::new();
+        // 1) 供应商块（标题行 + 明细行 + 折叠窗口子菜单），块上限沿用 50；
+        //    id 加序号防别名重复冲突
+        const MAX_PROVIDER_BLOCKS: usize = 50;
+        let now = Utc::now();
+        let mut provider_blocks = Vec::new();
         for (i, p) in summary
             .providers
             .iter()
-            .take(MAX_PROVIDER_ITEMS)
+            .take(MAX_PROVIDER_BLOCKS)
             .enumerate()
         {
-            let text = format_provider_line(p);
-            // 注意：此处 continue 会使 provider_items 与 summary.providers 失去 1:1 对应，
-            // 破坏 fast path 原地 zip 对齐的前提；仅当条目创建失败（极端）才会发生
-            if let Ok(item) = MenuItem::with_id(
+            let block = provider_menu_block(p, now);
+            let Ok(title) = MenuItem::with_id(
                 app_handle,
-                format!("detail_{}_{}", i, p.alias),
-                &text,
+                format!("p{i}_title"),
+                &block.title,
                 false,
                 None::<&str>,
-            ) {
-                let _ = menu.append(&item); // 供应商展示项失败可忽略
-                provider_items.push(item);
+            ) else {
+                continue;
+            };
+            let _ = menu.append(&title);
+
+            let mut detail_items = Vec::new();
+            for (j, text) in block.details.iter().enumerate() {
+                if let Ok(item) =
+                    MenuItem::with_id(app_handle, format!("p{i}_d{j}"), text, false, None::<&str>)
+                {
+                    let _ = menu.append(&item);
+                    detail_items.push(item);
+                }
             }
+
+            let mut extra_handle = None;
+            if !block.extra_windows.is_empty() {
+                let label = format!("其余 {} 个窗口", block.extra_windows.len());
+                if let Ok(sub) = Submenu::with_id(app_handle, format!("p{i}_extra"), &label, true) {
+                    let mut sub_items = Vec::new();
+                    for (j, text) in block.extra_windows.iter().enumerate() {
+                        if let Ok(item) = MenuItem::with_id(
+                            app_handle,
+                            format!("p{i}_e{j}"),
+                            text,
+                            false,
+                            None::<&str>,
+                        ) {
+                            let _ = sub.append(&item);
+                            sub_items.push(item);
+                        }
+                    }
+                    let _ = menu.append(&sub);
+                    extra_handle = Some((sub, sub_items));
+                }
+            }
+
+            provider_blocks.push(ProviderMenuHandles {
+                title,
+                details: detail_items,
+                extra: extra_handle,
+            });
         }
 
         // 2) 超过上限则追加截断提示
-        if summary.providers.len() > MAX_PROVIDER_ITEMS {
+        if summary.providers.len() > MAX_PROVIDER_BLOCKS {
             let text = format!("…共 {} 个供应商", summary.providers.len());
             if let Ok(item) =
                 MenuItem::with_id(app_handle, "provider_overflow", &text, false, None::<&str>)
@@ -710,7 +718,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let _ = tray.set_menu(Some(menu));
             // 登记条目句柄：此后数据轮询仅原地改写文案，不再走重建路径
             let handles = TrayMenuHandles {
-                provider_items,
+                provider_blocks,
                 time_item: time_item_handle,
                 interval_items,
                 signature,
@@ -733,7 +741,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{BalanceData, ProviderStatus};
+    use crate::models::ProviderStatus;
 
     // ---------- provider_signature ----------
 
@@ -815,6 +823,60 @@ mod tests {
             ..Default::default()
         };
         assert_ne!(provider_signature(&a), provider_signature(&b));
+    }
+
+    #[test]
+    fn signature_changes_when_quota_set_changes() {
+        let p1 = status_full(
+            "CC",
+            "a",
+            None,
+            Some(vec![quota("5小时", 38.0, None)]),
+            None,
+        );
+        let p2 = status_full(
+            "CC",
+            "a",
+            None,
+            Some(vec![quota("5小时", 38.0, None), quota("7天", 19.0, None)]),
+            None,
+        );
+        let s1 = UsageSummary {
+            providers: vec![p1],
+            ..Default::default()
+        };
+        let s2 = UsageSummary {
+            providers: vec![p2],
+            ..Default::default()
+        };
+        assert_ne!(provider_signature(&s1), provider_signature(&s2));
+    }
+
+    #[test]
+    fn signature_stable_when_only_values_change() {
+        let p1 = status_full(
+            "CC",
+            "a",
+            None,
+            Some(vec![quota("5小时", 38.0, None)]),
+            None,
+        );
+        let p2 = status_full(
+            "CC",
+            "a",
+            None,
+            Some(vec![quota("5小时", 41.0, None)]),
+            None,
+        );
+        let s1 = UsageSummary {
+            providers: vec![p1],
+            ..Default::default()
+        };
+        let s2 = UsageSummary {
+            providers: vec![p2],
+            ..Default::default()
+        };
+        assert_eq!(provider_signature(&s1), provider_signature(&s2));
     }
 
     // ---------- update_time_text ----------
@@ -906,121 +968,6 @@ mod tests {
     #[test]
     fn status_dot_level_0_is_green() {
         assert_eq!(status_dot(0), "🟢");
-    }
-
-    // ---------- used_percent ----------
-
-    fn pct_balance(available: f64) -> BalanceData {
-        BalanceData {
-            provider: "test".into(),
-            available_balance: available,
-            voucher_balance: 0.0,
-            cash_balance: 0.0,
-            total_balance: 100.0,
-            currency: "%".into(),
-        }
-    }
-
-    #[test]
-    fn used_percent_normal() {
-        let b = pct_balance(70.0); // 剩余 70% → 已用 30%
-        assert!((used_percent(&b) - 30.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn used_percent_overused_clamps_to_100() {
-        let b = pct_balance(-5.0); // 超额 → clamp 到 100
-        assert!((used_percent(&b) - 100.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn used_percent_full_remaining_zero() {
-        let b = pct_balance(100.0); // 满额 → 已用 0
-        assert!((used_percent(&b) - 0.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn used_percent_non_percent_returns_zero() {
-        let b = BalanceData {
-            provider: "test".into(),
-            available_balance: 42.0,
-            voucher_balance: 0.0,
-            cash_balance: 0.0,
-            total_balance: 100.0,
-            currency: "USD".into(),
-        };
-        assert!((used_percent(&b) - 0.0).abs() < 1e-9);
-    }
-
-    // ---------- format_provider_line ----------
-
-    fn make_status(
-        alias: &str,
-        balance: Option<BalanceData>,
-        error: Option<String>,
-    ) -> ProviderStatus {
-        ProviderStatus {
-            name: alias.to_string(),
-            alias: alias.to_string(),
-            enabled: true,
-            balance,
-            usage: None,
-            error,
-            quota_infos: None,
-        }
-    }
-
-    #[test]
-    fn format_percent_provider_contains_bar_and_percent() {
-        let p = make_status("智谱", Some(pct_balance(70.0)), None);
-        let line = format_provider_line(&p);
-        assert!(line.contains("█"), "应包含进度条: {line}");
-        assert!(line.contains("30%"), "应包含已用百分比: {line}");
-        assert!(line.contains("剩余 70%"), "应包含剩余百分比: {line}");
-    }
-
-    #[test]
-    fn format_usd_provider_contains_dollar() {
-        let b = BalanceData {
-            provider: "OpenAI".into(),
-            available_balance: 12.34,
-            voucher_balance: 0.0,
-            cash_balance: 0.0,
-            total_balance: 12.34,
-            currency: "USD".into(),
-        };
-        let p = make_status("OpenAI", Some(b), None);
-        let line = format_provider_line(&p);
-        assert!(line.contains("$12.34"), "应包含 $ 金额: {line}");
-    }
-
-    #[test]
-    fn format_cny_provider_contains_yen() {
-        let b = BalanceData {
-            provider: "DeepSeek".into(),
-            available_balance: 88.88,
-            voucher_balance: 10.0,
-            cash_balance: 78.88,
-            total_balance: 88.88,
-            currency: "CNY".into(),
-        };
-        let p = make_status("DeepSeek", Some(b), None);
-        let line = format_provider_line(&p);
-        assert!(line.contains("¥88.88"), "应包含 ¥ 金额: {line}");
-    }
-
-    #[test]
-    fn format_error_provider_contains_failure() {
-        let p = make_status("Kimi", None, Some("network error".into()));
-        let line = format_provider_line(&p);
-        assert!(line.contains("获取失败"), "应包含获取失败: {line}");
-    }
-
-    #[test]
-    fn format_no_data_provider_contains_no_data() {
-        let p = make_status("Unknown", None, None);
-        let line = format_provider_line(&p);
-        assert!(line.contains("无数据"), "应包含无数据: {line}");
     }
 
     // ---------- provider_menu_block ----------

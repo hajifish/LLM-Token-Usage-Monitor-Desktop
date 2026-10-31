@@ -190,6 +190,23 @@ pub(crate) fn append_query_param(base_url: &str, key: &str, value: &str) -> Stri
     }
 }
 
+/// 将 ISO 8601 时间字符串转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
+/// Kimi Code / Qoder 等订阅型供应商的 reset_at 文本回退共用。
+pub(crate) fn format_iso_reset(iso: &str) -> String {
+    use chrono::{DateTime, Utc};
+    match iso.parse::<DateTime<Utc>>() {
+        Ok(dt) => {
+            let duration = dt.signed_duration_since(Utc::now());
+            if duration > chrono::Duration::zero() {
+                crate::tray::countdown_compact(duration)
+            } else {
+                "0M".to_string()
+            }
+        }
+        Err(_) => iso.to_string(),
+    }
+}
+
 /// 测试共享工具：消除 mod.rs / openai.rs / anthropic.rs 三处重复的 val() 定义。
 #[cfg(test)]
 pub(crate) mod test_util {

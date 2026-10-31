@@ -1,4 +1,4 @@
-use super::{http_client, LlmProvider, ProviderError};
+use super::{format_iso_reset, http_client, LlmProvider, ProviderError};
 use crate::models::{BalanceData, QuotaInfo};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -217,22 +217,6 @@ impl KimiCodeProvider {
         let stats = wrapper.data.unwrap_or_default();
         let _ = self.cached_response.set(stats.clone());
         Ok(stats)
-    }
-}
-
-/// 将 ISO 8601 时间字符串转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
-fn format_iso_reset(iso: &str) -> String {
-    use chrono::{DateTime, Utc};
-    match iso.parse::<DateTime<Utc>>() {
-        Ok(dt) => {
-            let duration = dt.signed_duration_since(Utc::now());
-            if duration > chrono::Duration::zero() {
-                crate::tray::countdown_compact(duration)
-            } else {
-                "0M".to_string()
-            }
-        }
-        Err(_) => iso.to_string(),
     }
 }
 

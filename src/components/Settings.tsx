@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppConfig, ConfigHealth, ProviderConfig } from '../types';
@@ -136,6 +136,47 @@ function Settings({ onBack }: SettingsProps) {
   }, []);
 
   const dismiss = (key: string) => setDismissed((d) => ({ ...d, [key]: true }));
+
+  /** 状态栏显示区块的开关即时生效：读最新配置 → 仅改本区块字段 → 落盘。
+   *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
+   *  读改写期间忽略重复触发，避免连点丢失更新。 */
+  const traySavingRef = useRef(false);
+  const applyTrayDisplay = async (
+    patch: { master?: boolean; providerIndex?: number; providerName?: string; value: boolean },
+  ) => {
+    if (traySavingRef.current) return;
+    traySavingRef.current = true;
+    try {
+      const fresh = await invoke<AppConfig>('get_config');
+      if (patch.master !== undefined) {
+        fresh.tray_text_enabled = patch.master;
+      }
+      if (patch.providerIndex !== undefined) {
+        const fp = fresh.providers[patch.providerIndex];
+        // 以类型名核对本地索引与后端配置的对应关系，错位时跳过（保守不写错对象）
+        if (fp && fp.name === patch.providerName) {
+          fp.show_in_tray = patch.value;
+        }
+      }
+      await invoke('save_config', { newConfig: fresh });
+      // 同步本页表单状态：只动本区块字段，保留其他未保存编辑
+      setConfig((cur) => {
+        if (!cur) return cur;
+        const providers = cur.providers.map((p, i) =>
+          i === patch.providerIndex ? { ...p, show_in_tray: patch.value } : p,
+        );
+        return {
+          ...cur,
+          tray_text_enabled: patch.master ?? cur.tray_text_enabled,
+          providers,
+        };
+      });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      traySavingRef.current = false;
+    }
+  };
 
   const updateProvider = (index: number, field: keyof ProviderConfig, value: string | boolean) => {
     if (!config) return;
@@ -281,7 +322,7 @@ function Settings({ onBack }: SettingsProps) {
                   type="checkbox"
                   checked={config.tray_text_enabled}
                   onChange={(e) =>
-                    setConfig({ ...config, tray_text_enabled: e.target.checked })
+                    applyTrayDisplay({ master: e.target.checked, value: e.target.checked })
                   }
                 />
               </label>
@@ -296,7 +337,13 @@ function Settings({ onBack }: SettingsProps) {
                       <input
                         type="checkbox"
                         checked={p.show_in_tray}
-                        onChange={(e) => updateProvider(i, 'show_in_tray', e.target.checked)}
+                        onChange={(e) =>
+                          applyTrayDisplay({
+                            providerIndex: i,
+                            providerName: p.name,
+                            value: e.target.checked,
+                          })
+                        }
                       />
                       <span>{p.alias?.trim() || providerLabel(p.name)}</span>
                     </label>
@@ -304,7 +351,7 @@ function Settings({ onBack }: SettingsProps) {
               </div>
             )}
             <span className="update-hint">
-              关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。修改需点击右上角「保存」生效。
+              开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
             </span>
           </div>
         </div>

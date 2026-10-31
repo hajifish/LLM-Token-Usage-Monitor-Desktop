@@ -55,8 +55,7 @@ Starting with v0.2, the app includes built-in auto-update:
 - **What it checks** — the latest published release on GitHub Releases (draft releases are not visible publicly, so publishing the draft acts as the distribution gate). You are not bothered when you are already up to date.
 - **Download and install** — when a new version is found, you can download, install, and restart entirely in-app; no manual installer download required.
 - **Signature verification** — update packages are signed with minisign and verified against the public key embedded in the app. A package that fails verification is discarded.
-- **Skip a version** — you can skip a specific version so it no longer prompts; undo it later under Settings → About & Updates. **A manual check ignores the skip record** and offers that version again, letting you choose to install or skip once more; automatic checks keep respecting the skip.
-- **Check-result notifications** — check results arrive as system notifications (kept in Notification Center): manual checks always report (up to date / new version / failure reason), while automatic checks only notify when a new version is found. The tray item label also carries the latest result ("✓ Up to date", "⚠ Check failed", …).
+- **Skip a version** — you can skip a specific version so it no longer prompts; undo it later under Settings → About & Updates.
 - **Turn off auto-check** — auto-check can be disabled under Settings → About & Updates; manual checks remain available.
 - **macOS permission prompt** — replacing the app in `/Applications` requires administrator rights, so macOS may ask for your password during installation. This is expected.
 - **Getting the capability for the first time** — versions before v0.2 have no update module, so you need to install v0.2 or later manually once. After that, updates happen in-app.

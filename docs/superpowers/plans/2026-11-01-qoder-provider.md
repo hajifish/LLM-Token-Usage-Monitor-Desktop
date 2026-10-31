@@ -27,7 +27,7 @@
 **Interfaces:**
 - Produces: `pub(crate) fn format_iso_reset(iso: &str) -> String`（mod.rs，qoder.rs Task 2/3 复用）
 
-- [ ] **Step 1: 把 kimi_code.rs 的 `format_iso_reset`（含 doc 注释）整体搬到 mod.rs 工具函数区（`append_query_param` 之后），可见性改 `pub(crate)`**
+- [x] **Step 1: 把 kimi_code.rs 的 `format_iso_reset`（含 doc 注释）整体搬到 mod.rs 工具函数区（`append_query_param` 之后），可见性改 `pub(crate)`**
 
 ```rust
 /// 将 ISO 8601 时间字符串转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
@@ -48,18 +48,18 @@ pub(crate) fn format_iso_reset(iso: &str) -> String {
 }
 ```
 
-- [ ] **Step 2: kimi_code.rs 删除本地定义，顶部 import 改为**
+- [x] **Step 2: kimi_code.rs 删除本地定义，顶部 import 改为**
 
 ```rust
 use super::{format_iso_reset, http_client, LlmProvider, ProviderError};
 ```
 
-- [ ] **Step 3: 跑 kimi 测试确认搬迁无破坏**
+- [x] **Step 3: 跑 kimi 测试确认搬迁无破坏**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml kimi_code`
 Expected: 全部 PASS（`format_iso_reset` 相关 3 个测试经 `use super::*` glob 仍可见）
 
-- [ ] **Step 4: Commit（只 add 这两个文件）**
+- [x] **Step 4: Commit（只 add 这两个文件）**
 
 ```bash
 git add src-tauri/src/providers/mod.rs src-tauri/src/providers/kimi_code.rs
@@ -78,7 +78,7 @@ git commit -m "refactor: format_iso_reset 下沉 providers/mod.rs 供多供应�
 - Consumes: `super::format_iso_reset`（Task 1）
 - Produces: `QuotaUsageResponse { user_quota, add_on_quota, dedicated_packages }`、`fn normalize_time(Option<&Value>) -> Option<String>`、`fn build_quota_rows(&QuotaUsageResponse, Option<&str>) -> Vec<QuotaInfo>`、`fn min_remaining_percent(&[QuotaInfo]) -> f64`（Task 3 网络层调用）
 
-- [ ] **Step 1: 写失败测试（qoder.rs 骨架 + `#[cfg(test)]`，先只有 struct 定义与测试）**
+- [x] **Step 1: 写失败测试（qoder.rs 骨架 + `#[cfg(test)]`，先只有 struct 定义与测试）**
 
 测试用例（完整代码）：
 
@@ -202,12 +202,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: 跑测试确认编译失败（struct 字段/fn 未实现）**
+- [x] **Step 2: 跑测试确认编译失败（struct 字段/fn 未实现）**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml qoder`
 Expected: FAIL（`normalize_time`/`build_quota_rows`/`min_remaining_percent` 未定义；`mod qoder;` 未声明前先在 mod.rs 加声明）
 
-- [ ] **Step 3: 最小实现（struct + 纯函数；本 Task 不写网络层）**
+- [x] **Step 3: 最小实现（struct + 纯函数；本 Task 不写网络层）**
 
 ```rust
 //! Qoder（阿里 Qwen 系 agentic IDE）订阅 Credits 配额供应商。
@@ -377,12 +377,12 @@ fn min_remaining_percent(rows: &[QuotaInfo]) -> f64 {
 
 （`use async_trait::async_trait;` 与 `LlmProvider`/`BalanceData` import 在本 Task 尚未用到会报 unused——本 Task 先不放这两个 import，Task 3 再加。`Client`/`http_client` 同理 Task 3 再引入。）
 
-- [ ] **Step 4: 跑测试确认全绿**
+- [x] **Step 4: 跑测试确认全绿**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml qoder`
 Expected: 7 个测试 PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/providers/qoder.rs src-tauri/src/providers/mod.rs
@@ -400,7 +400,7 @@ git commit -m "feat: Qoder 配额响应解析与额度桶平铺映射（纯函�
 - Consumes: Task 2 全部产物、`super::{http_client, format_iso_reset}`
 - Produces: `pub struct QoderProvider`（`new(api_key: &str)`）、`impl LlmProvider`（name="Qoder"）——Task 4 工厂接线依赖
 
-- [ ] **Step 1: 追加失败测试（区域决策 + 错误文案 + 手动 E2E 挂钩）**
+- [x] **Step 1: 追加失败测试（区域决策 + 错误文案 + 手动 E2E 挂钩）**
 
 ```rust
     // ---- 区域探测决策（纯函数） ----
@@ -447,12 +447,12 @@ git commit -m "feat: Qoder 配额响应解析与额度桶平铺映射（纯函�
     }
 ```
 
-- [ ] **Step 2: 跑测试确认新断言失败（fn 未定义）**
+- [x] **Step 2: 跑测试确认新断言失败（fn 未定义）**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml qoder`
 Expected: FAIL（`should_switch_region` / `to_provider_error` / `QoderProvider` 未定义）
 
-- [ ] **Step 3: 实现网络层与 trait 实现（追加到 qoder.rs）**
+- [x] **Step 3: 实现网络层与 trait 实现（追加到 qoder.rs）**
 
 ```rust
 // --- 网络层 ---
@@ -664,12 +664,12 @@ use serde::Deserialize;
 use serde_json::Value;
 ```
 
-- [ ] **Step 4: 跑测试确认全绿（含 #[ignore] 编译通过）**
+- [x] **Step 4: 跑测试确认全绿（含 #[ignore] 编译通过）**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml qoder`
 Expected: 10 个测试 PASS，1 ignored
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/providers/qoder.rs
@@ -690,7 +690,7 @@ git commit -m "feat: QoderProvider 网络层——PAT 兑换、国际/国内区�
 - Consumes: `qoder::QoderProvider::new(api_key: &str) -> QoderProvider`（Task 3）
 - Produces: 工厂键 `"Qoder"`、短码 `"QD"`、托盘 PNG 图标
 
-- [ ] **Step 1: 下载 Qoder 官方图标（Google favicon 服务 64px，与现有图标同源）**
+- [x] **Step 1: 下载 Qoder 官方图标（Google favicon 服务 64px，与现有图标同源）**
 
 ```bash
 curl -sL "https://www.google.com/s2/favicons?domain=qoder.com&sz=64" -o src-tauri/icons/providers/qoder.png
@@ -699,7 +699,7 @@ file src-tauri/icons/providers/qoder.png   # 期望: PNG image data, 64 x 64
 
 失败兜底：从 `https://qoder.com` 首页找 logo 资源 URL 下载后 `sips -z 64 64` 转换。
 
-- [ ] **Step 2: mod.rs 三处 + 测试数组**
+- [x] **Step 2: mod.rs 三处 + 测试数组**
 
 `pub mod qoder;`（按字母序插入 openai 与 zhipu 之间）；`ALL_PROVIDER_TYPES` 尾部加 `"Qoder"`；`create_provider` 加：
 
@@ -709,7 +709,7 @@ file src-tauri/icons/providers/qoder.png   # 期望: PNG image data, 64 x 64
 
 `display_name` 无需 arm（`other => other` 兜底即 "Qoder"），但守卫测试 `display_name_maps_all_types` 的 `expected` 数组加 `("Qoder", "Qoder")`。
 
-- [ ] **Step 3: tray.rs 短码**
+- [x] **Step 3: tray.rs 短码**
 
 ```rust
         "Qoder" => Some("QD"),
@@ -717,7 +717,7 @@ file src-tauri/icons/providers/qoder.png   # 期望: PNG image data, 64 x 64
 
 （`every_builtin_provider_type_has_short_code` 守卫遍历 `ALL_PROVIDER_TYPES` 自动覆盖。）
 
-- [ ] **Step 4: scheduler.rs `provider_logo` 加臂 + 测试更新**
+- [x] **Step 4: scheduler.rs `provider_logo` 加臂 + 测试更新**
 
 ```rust
         "Qoder" => include_bytes!("../icons/providers/qoder.png"),
@@ -725,12 +725,12 @@ file src-tauri/icons/providers/qoder.png   # 期望: PNG image data, 64 x 64
 
 测试 `provider_logo_maps_eight_known_types` 改名 `provider_logo_maps_known_types`，列表加 `"Qoder"`。
 
-- [ ] **Step 5: 全量 Rust 测试 + clippy + fmt**
+- [x] **Step 5: 全量 Rust 测试 + clippy + fmt**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings && cargo fmt --manifest-path src-tauri/Cargo.toml --check`
 Expected: 全绿（fmt 有 diff 就先 `cargo fmt` 再复跑）
 
-- [ ] **Step 6: Commit（scheduler.rs 是并行 WIP 文件：add 前 `git diff src-tauri/src/scheduler.rs` 核对仅含 provider_logo 相关 hunk）**
+- [x] **Step 6: Commit（scheduler.rs 是并行 WIP 文件：add 前 `git diff src-tauri/src/scheduler.rs` 核对仅含 provider_logo 相关 hunk）**
 
 ```bash
 git add src-tauri/src/providers/mod.rs src-tauri/src/tray.rs src-tauri/src/scheduler.rs src-tauri/icons/providers/qoder.png
@@ -750,30 +750,30 @@ git commit -m "feat: 接线 Qoder 供应商——工厂/短码/托盘图标"
 - Consumes: 后端类型键 `"Qoder"`（Task 4）
 - Produces: 设置页可选「Qoder」；主窗口卡片 logo
 
-- [ ] **Step 1: Settings.tsx `PROVIDER_OPTIONS` 尾部加**
+- [x] **Step 1: Settings.tsx `PROVIDER_OPTIONS` 尾部加**
 
 ```ts
   { value: 'Qoder', label: 'Qoder' },
 ```
 
-- [ ] **Step 2: UsagePanel.tsx `BRAND_LOGOS` 尾部加**
+- [x] **Step 2: UsagePanel.tsx `BRAND_LOGOS` 尾部加**
 
 ```ts
   Qoder: '/providers/qoder.png',
 ```
 
-- [ ] **Step 3: 复制图标**
+- [x] **Step 3: 复制图标**
 
 ```bash
 cp src-tauri/icons/providers/qoder.png public/providers/qoder.png
 ```
 
-- [ ] **Step 4: 前端构建 + lint**
+- [x] **Step 4: 前端构建 + lint**
 
 Run: `npm run build && npx eslint src`
 Expected: 全绿
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/Settings.tsx public/providers/qoder.png
@@ -789,7 +789,7 @@ git commit -m "feat: 前端接入 Qoder——设置选项与卡片品牌图标"
 **Files:**
 - 无新增（验证与提交收尾）
 
-- [ ] **Step 1: 全量质量门**
+- [x] **Step 1: 全量质量门**
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
@@ -798,21 +798,28 @@ cargo fmt --manifest-path src-tauri/Cargo.toml --check
 npm run build && npx eslint src
 ```
 
-- [ ] **Step 2: 真实凭据获取（按序尝试，全部失败则如实报告）**
+- [x] **Step 2: 真实凭据获取（按序尝试，全部失败则如实报告）**
 
 1. 本机已知 Qoder machineToken（`aicoding.loginMachineIdentity.v1.qoder.local`）直接作 Bearer 试 `/api/v2/quota/usage`（两个区域）；预期大概率 401（它是设备身份不是用户凭据），但零成本验证。
 2. 定向查找 Qoder 客户端凭据文件（`auth.v1.dat` / `auth.json`，CreditDaddy 读取的已知路径 `~/Library/Application Support/Qoder{,CN}/`）；明文则提取 token。
 3. 均不可用 → 用已知 machineToken 跑 `QODER_PAT=<token> cargo test qoder_e2e_real_api -- --ignored --nocapture` 验证错误路径干净（预期报「PAT 无效或已过期」而非 panic/裸状态码）。
 
-- [ ] **Step 3: 若拿到有效凭据 → 应用级端到端**
+- [x] **Step 3: 若拿到有效凭据 → 应用级端到端**
 
 利用 app 首启明文配置自动迁移机制（config.rs `load_plaintext_and_migrate`）：在 app config 目录写入 `{"providers":[{"name":"Qoder","api_key":"<token>","enabled":true}]}` → 启动 `npm run tauri dev` → 观察日志轮询成功 + 主窗口/托盘出现 Qoder 卡片 → 截图留证 → 还原配置文件。
 
-- [ ] **Step 4: 收尾核对并最终提交（如有未提交的验证产物/文档修订）**
+- [x] **Step 4: 收尾核对并最终提交（如有未提交的验证产物/文档修订）**
 
 ```bash
 git branch --show-current   # 必须 feature/main-window-compact
 git status --short          # 逐项确认：并行 WIP 文件不得混入
 ```
 
-- [ ] **Step 5: 向用户汇报验证结果与提交清单（PR review 准备就绪）**
+- [x] **Step 5: 向用户汇报验证结果与提交清单（PR review 准备就绪）**
+
+## 执行记录（2026-11-01）
+
+- 全部 6 个任务完成；提交序列：fccecfe → 9eaa318 → ebe0069 → 26c94ca → 14eed36 → cc166af → 5cbbb57。
+- Task 4/5 的并行 WIP 文件（scheduler.rs、UsagePanel.tsx）按 hunk 过滤选择性暂存，未混入他会话改动。
+- 真机验证：端点契约实测（兑换端点双区域 400 语义 → 触发 5cbbb57 修正）；应用级 E2E 走通（明文配置迁移 → 调度轮询 → 区域回退 → 友好错误，3 个轮询周期稳定）；错误路径 E2E 测试输出符合预期。
+- 视觉截图验证因屏幕锁定未做；错误卡渲染路径由单测覆盖。真实额度数据展示需用户在设置中粘贴有效 PAT。

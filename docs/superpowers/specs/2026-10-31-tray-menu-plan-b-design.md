@@ -1,7 +1,7 @@
 # 状态栏方案 B 重设计：原生菜单增强 + V3 聚合标题 · 设计 spec
 
 - 日期：2026-10-31
-- 状态：已评审通过，实施中（2026-10-31 修订：PR #61 已合入 develop，分支已 rebase 其上；告警字符沿用既有 `⚠️`；新增 `reset_at` ISO 字段支撑紧凑倒计时）
+- 状态：已实施（2026-10-31 修订：PR #61 已合入 develop，分支已 rebase 其上；告警字符沿用既有 `⚠️`；新增 `reset_at` ISO 字段支撑紧凑倒计时）
 - 分支：`feat/tray-menu-redesign`（基于 `origin/develop` @ 03c7e55，含 PR #61）
 - 设计草图：`docs/design/status-bar-redesign-mockup.html`（三方案对照与假数据渲染）
 

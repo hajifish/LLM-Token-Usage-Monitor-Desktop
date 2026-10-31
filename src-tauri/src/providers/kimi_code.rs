@@ -125,6 +125,7 @@ impl LlmProvider for KimiCodeProvider {
                     remaining: Some(100.0 - used_pct),
                     remaining_percent: 100.0 - used_pct,
                     reset_time: r.reset_time.as_ref().map(|s| format_iso_reset(s)),
+                    reset_at: r.reset_time.clone(),
                     plan_label: Some("Kimi Code".to_string()),
                 });
             }
@@ -141,6 +142,7 @@ impl LlmProvider for KimiCodeProvider {
                     remaining: Some(100.0 - used_pct),
                     remaining_percent: 100.0 - used_pct,
                     reset_time: r.reset_time.as_ref().map(|s| format_iso_reset(s)),
+                    reset_at: r.reset_time.clone(),
                     plan_label: Some("Kimi Code".to_string()),
                 });
             }
@@ -157,6 +159,7 @@ impl LlmProvider for KimiCodeProvider {
                 remaining: Some(100.0 - used_pct),
                 remaining_percent: 100.0 - used_pct,
                 reset_time: sb.expire_time.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: sb.expire_time.clone(),
                 plan_label: Some("Kimi Code".to_string()),
             });
         }

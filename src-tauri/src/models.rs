@@ -101,6 +101,10 @@ pub struct QuotaInfo {
     pub remaining_percent: f64,
     /// 重置时间
     pub reset_time: Option<String>,
+    /// 重置时刻（ISO 8601 / RFC3339 UTC），供展示层精确换算倒计时；
+    /// 缺失时回退 reset_time 的本地化文本。向后兼容旧数据（serde default）
+    #[serde(default)]
+    pub reset_at: Option<String>,
     /// 配额类型标签（如 "coding plan"）
     pub plan_label: Option<String>,
 }
@@ -122,4 +126,19 @@ pub struct UsageSummary {
     pub providers: Vec<ProviderStatus>,
     pub total_balance: f64,
     pub last_updated: String,
+}
+
+#[cfg(test)]
+mod quota_reset_at_tests {
+    use super::*;
+
+    #[test]
+    fn reset_at_defaults_none_for_legacy_json() {
+        // 旧持久化数据无 reset_at 字段 → serde default 兼容
+        let json = r#"{"name":"5小时","used":38.0,"total":100.0,
+            "current_value":null,"remaining":62.0,"remaining_percent":62.0,
+            "reset_time":"1小时后重置","plan_label":null}"#;
+        let q: QuotaInfo = serde_json::from_str(json).unwrap();
+        assert!(q.reset_at.is_none());
+    }
 }

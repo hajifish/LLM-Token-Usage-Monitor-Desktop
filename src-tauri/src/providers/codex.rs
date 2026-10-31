@@ -1,6 +1,7 @@
 use super::{http_client, LlmProvider, ProviderError};
 use crate::models::{BalanceData, QuotaInfo};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -117,6 +118,8 @@ impl LlmProvider for CodexProvider {
                     remaining: Some(100.0 - pw.used_percent as f64),
                     remaining_percent: 100.0 - pw.used_percent as f64,
                     reset_time: Some(format_reset_time(pw.reset_at)),
+                    reset_at: DateTime::<Utc>::from_timestamp(pw.reset_at, 0)
+                        .map(|dt| dt.to_rfc3339()),
                     plan_label: plan_label.clone(),
                 });
             }
@@ -129,6 +132,8 @@ impl LlmProvider for CodexProvider {
                     remaining: Some(100.0 - sw.used_percent as f64),
                     remaining_percent: 100.0 - sw.used_percent as f64,
                     reset_time: Some(format_reset_time(sw.reset_at)),
+                    reset_at: DateTime::<Utc>::from_timestamp(sw.reset_at, 0)
+                        .map(|dt| dt.to_rfc3339()),
                     plan_label: plan_label.clone(),
                 });
             }

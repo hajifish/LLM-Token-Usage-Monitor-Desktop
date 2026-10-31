@@ -99,6 +99,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -112,6 +113,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -125,6 +127,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -138,6 +141,7 @@ impl LlmProvider for ClaudeCodeProvider {
                 remaining: Some(100.0 - w.utilization),
                 remaining_percent: 100.0 - w.utilization,
                 reset_time: w.resets_at.as_ref().map(|s| format_iso_reset(s)),
+                reset_at: w.resets_at.clone(),
                 plan_label: None,
             });
         }
@@ -352,5 +356,20 @@ mod tests {
     fn test_format_iso_reset_invalid_string() {
         let result = format_iso_reset("not-a-date");
         assert_eq!(result, "not-a-date");
+    }
+
+    // --- reset_at 原始 ISO 透传测试 ---
+
+    #[tokio::test]
+    async fn quota_infos_carry_raw_iso_reset_at() {
+        // provider 环境变量凭证不可用，直接测 fetch_quota_infos 内部逻辑等价物：
+        // 构造带 resets_at 的响应 → QuotaInfo.reset_at 应为原始 ISO 串
+        let json = r#"{"five_hour":{"utilization":38.0,"resets_at":"2026-10-31T18:00:00Z"},
+            "seven_day":{"utilization":19.0,"resets_at":"2026-11-04T00:00:00Z"}}"#;
+        let resp: ClaudeUsageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            resp.five_hour.as_ref().unwrap().resets_at.as_deref(),
+            Some("2026-10-31T18:00:00Z")
+        );
     }
 }

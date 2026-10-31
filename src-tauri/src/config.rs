@@ -574,6 +574,21 @@ mod tests {
         );
     }
 
+    /// 旧版配置连 refresh_interval 都没有（更早的配置文件）也应能加载，并回退到默认 60 秒。
+    #[test]
+    fn legacy_config_without_refresh_interval_gets_default() {
+        let legacy = r#"{"providers":[{"name":"DeepSeek","api_key":"sk-x","enabled":true}]}"#;
+        let cfg: AppConfig = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            cfg.refresh_interval, 60,
+            "缺省的 refresh_interval 应默认为 60"
+        );
+        assert!(
+            cfg.providers[0].show_in_tray,
+            "其余缺省字段同样由 serde default 兜底"
+        );
+    }
+
     /// 新增托盘字段随加密信封 roundtrip 不丢失。
     #[test]
     fn tray_fields_survive_save_load_roundtrip() {

@@ -556,6 +556,7 @@ mod tests {
             refresh_interval: 120,
             auto_check_update: true,
             tray_text_enabled: true,
+            notifications_enabled: true,
         }
     }
 
@@ -572,6 +573,10 @@ mod tests {
             cfg.providers[0].show_in_tray,
             "缺省的 show_in_tray 应默认为 true"
         );
+        assert!(
+            cfg.notifications_enabled,
+            "缺省的 notifications_enabled 应默认为 true"
+        );
     }
 
     /// 新增托盘字段随加密信封 roundtrip 不丢失。
@@ -580,12 +585,14 @@ mod tests {
         let path = unique_temp_path("tray-roundtrip");
         let mut cfg = sample_config();
         cfg.tray_text_enabled = false;
+        cfg.notifications_enabled = false;
         cfg.providers[0].show_in_tray = false;
         save_to_path(&path, &cfg, false).unwrap();
 
         let (loaded, health) = load_from_path(&path);
         assert!(!health.unreadable);
         assert!(!loaded.tray_text_enabled);
+        assert!(!loaded.notifications_enabled);
         assert!(!loaded.providers[0].show_in_tray);
         assert!(loaded.providers[1].show_in_tray);
 

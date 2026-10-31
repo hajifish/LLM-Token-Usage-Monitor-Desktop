@@ -64,6 +64,9 @@ pub struct AppConfig {
     /// 托盘文字总开关：关闭后菜单栏仅显示图标
     #[serde(default = "default_tray_text_enabled")]
     pub tray_text_enabled: bool,
+    /// 低余额主动系统通知：告警等级恶化时弹系统通知
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
 }
 
 fn default_auto_check_update() -> bool {
@@ -74,6 +77,10 @@ fn default_tray_text_enabled() -> bool {
     true
 }
 
+fn default_notifications_enabled() -> bool {
+    true
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -81,6 +88,7 @@ impl Default for AppConfig {
             refresh_interval: 60,
             auto_check_update: default_auto_check_update(),
             tray_text_enabled: default_tray_text_enabled(),
+            notifications_enabled: default_notifications_enabled(),
         }
     }
 }
@@ -140,5 +148,17 @@ mod quota_reset_at_tests {
             "reset_time":"1小时后重置","plan_label":null}"#;
         let q: QuotaInfo = serde_json::from_str(json).unwrap();
         assert!(q.reset_at.is_none());
+    }
+
+    #[test]
+    fn notifications_enabled_defaults_true_for_legacy_config() {
+        // 老配置文件无 notifications_enabled 字段 → serde default 兜底为 true，
+        // 缺字段必须仍能加载（存量用户升级后通知默认开启）
+        let json = r#"{"providers":[],"refresh_interval":60}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(
+            cfg.notifications_enabled,
+            "缺省的 notifications_enabled 应默认为 true"
+        );
     }
 }

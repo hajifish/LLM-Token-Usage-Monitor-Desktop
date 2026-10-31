@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod models;
+mod notification;
 mod providers;
 mod scheduler;
 mod secrets;
@@ -40,6 +41,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        // 低余额主动系统通知：Rust 侧直接发送（不依赖 webview 打开）
+        .plugin(tauri_plugin_notification::init())
         // 应用内自动更新：端点与公钥在 tauri.conf.json 的 plugins.updater 中配置
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {

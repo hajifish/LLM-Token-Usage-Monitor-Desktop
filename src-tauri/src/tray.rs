@@ -96,6 +96,25 @@ pub fn worst_warning(summary: &UsageSummary) -> u8 {
         .unwrap_or(0)
 }
 
+/// 告警等级（与 provider_warning_level 同阈值）：percent 型且能选出主窗口时按主窗口
+/// remaining_percent 判定（≤0→2 / <5→1 / 否则 0），其余情况回退 provider_warning_level。
+/// 使 ⚠️/状态点与 V3 显示值同源，配额紧张不再对告警通道不可见。
+pub fn quota_warning_level(p: &ProviderStatus) -> u8 {
+    if p.balance.as_ref().map(|b| b.is_percent()).unwrap_or(false) {
+        if let Some(primary) = p.quota_infos.as_ref().and_then(|qs| primary_quota(qs)) {
+            let v = primary.remaining_percent;
+            return if v <= 0.0 {
+                2
+            } else if v < 5.0 {
+                1
+            } else {
+                0
+            };
+        }
+    }
+    provider_warning_level(p)
+}
+
 /// 服务商类型的菜单栏短代码（1-2 字母，按用户可读性约定）。
 /// 未收录的类型返回 None，回退到别名前缀截断。
 fn tray_short_code(name: &str) -> Option<&'static str> {
@@ -174,24 +193,30 @@ pub fn countdown_compact(d: chrono::Duration) -> String {
     }
 }
 
-/// QuotaInfo 倒计时（菜单格式）：reset_at 精确换算，缺失/解析失败回退 reset_time 原文
+/// QuotaInfo 倒计时（菜单格式）：reset_at 能解析时精确换算——未过期格式化、
+/// 已过期省略（spec §5.4，不回退陈旧文本）；reset_at 缺失/解析失败才回退
+/// reset_time 原文
 pub fn quota_countdown_menu(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
-    q.reset_at
-        .as_deref()
-        .and_then(|iso| reset_remaining(iso, now))
-        .map(countdown_menu)
-        .or_else(|| q.reset_time.clone())
+    if let Some(iso) = q.reset_at.as_deref() {
+        if let Ok(dt) = iso.parse::<DateTime<Utc>>() {
+            let d = dt.signed_duration_since(now);
+            return (d > chrono::Duration::zero()).then(|| countdown_menu(d));
+        }
+    }
+    q.reset_time.clone()
 }
 
 /// QuotaInfo 倒计时（菜单栏紧凑格式）：同上回退策略
 /// 当前仅测试消费（紧凑菜单行未接入），非测试构建允许暂未使用。
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
-    q.reset_at
-        .as_deref()
-        .and_then(|iso| reset_remaining(iso, now))
-        .map(countdown_compact)
-        .or_else(|| q.reset_time.clone())
+    if let Some(iso) = q.reset_at.as_deref() {
+        if let Ok(dt) = iso.parse::<DateTime<Utc>>() {
+            let d = dt.signed_duration_since(now);
+            return (d > chrono::Duration::zero()).then(|| countdown_compact(d));
+        }
+    }
+    q.reset_time.clone()
 }
 
 /// 订阅计划多窗口中的主窗口：剩余百分比最低者；
@@ -282,8 +307,8 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
         return None;
     }
     visible.sort_by(|a, b| {
-        crate::tray::provider_warning_level(b)
-            .cmp(&crate::tray::provider_warning_level(a))
+        crate::tray::quota_warning_level(b)
+            .cmp(&crate::tray::quota_warning_level(a))
             .then_with(|| aggregate_is_percent(b).cmp(&aggregate_is_percent(a)))
             .then_with(|| {
                 aggregate_value(a)
@@ -304,7 +329,7 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
         Some(b) if b.is_percent() => format!("{} {:.0}%", code, aggregate_value(p)),
         _ => format!("{} {}", code, tray_value(p)),
     };
-    if provider_warning_level(p) > 0 {
+    if quota_warning_level(p) > 0 {
         let cd = p
             .quota_infos
             .as_ref()
@@ -538,7 +563,7 @@ mod tray_title_tests {
     }
 
     #[test]
-    fn title_joins_mixed_segments_with_separator() {
+    fn v3_aggregates_to_single_calm_segment() {
         // V3 聚合态：只显最紧张一项。三者均无告警 → percent 型在前、剩余最低者居首
         // （智谱 70% percent 型 > API 型 DS/OA），故标题只剩智谱一段，不再用 · 拼接
         let s = UsageSummary {
@@ -622,7 +647,7 @@ mod tray_title_tests {
     }
 
     #[test]
-    fn duplicate_visible_accounts_get_index_suffix() {
+    fn v3_alert_account_outranks_calm_sans_suffix() {
         // V3 聚合态：两账号均可见且都黄档（¥5 < 10）→ 告警同级、API 型、主值升序
         // → ¥5.00 居首；单条展示无歧义，第一名用基础短码不再追加序号（无 DS2）
         let mut a = status("工作号", Some(balance(88.0, "CNY")), None);
@@ -767,17 +792,52 @@ mod tray_title_tests {
 
     #[test]
     fn v3_alert_with_compact_countdown() {
-        // Codex 5h 剩 3%（<5 触发黄档）→ ⚠️ 前缀 + 紧凑倒计时（取主窗口 reset_at）
-        let qs = vec![quota("5小时", 3.0, Some("2026-10-31T12:12:00Z"))];
+        // Codex 5h 剩 3%（<5 触发黄档）→ ⚠️ 前缀 + 紧凑倒计时（取主窗口 reset_at）。
+        // reset_at 取远期（2999 年），倒计时段必为「Xd」且稳定存在，不受系统时钟影响
+        let qs = vec![quota("5小时", 3.0, Some("2999-01-01T00:00:00Z"))];
         let mut p = status_q("Codex", Some(balance(3.0, "%")), Some(qs));
         p.name = "Codex".into();
         let s = UsageSummary {
             providers: vec![p],
             ..Default::default()
         };
-        // 依赖系统时钟的倒计时断言不稳定 → 断言前缀与主值，倒计时格式由 countdown 测试覆盖：
         let title = build_tray_title(&config(vec![]), &s).unwrap();
-        assert!(title.starts_with("⚠️ CX 3%"), "got: {title}");
+        assert!(title.starts_with("⚠️ CX 3% · "), "got: {title}");
+    }
+
+    #[test]
+    fn v3_alert_source_matches_display_value() {
+        // balance 62% 但主窗口（7天Opus 剩 3%）才是显示值：告警判定必须与显示值同源，
+        // ⚠️ 不能因 balance 62% 平静而丢失（quota_warning_level 修复前会漏告警）
+        let qs = vec![quota("5小时", 62.0, None), quota("7天Opus", 3.0, None)];
+        let mut cc = status_q("CC", Some(balance(62.0, "%")), Some(qs));
+        cc.name = "Claude Code".into();
+        let s = UsageSummary {
+            providers: vec![cc],
+            ..Default::default()
+        };
+        let title = build_tray_title(&config(vec![]), &s).unwrap();
+        assert!(title.starts_with("⚠️"), "got: {title}");
+        assert!(title.contains("3%"), "got: {title}");
+    }
+
+    #[test]
+    fn quota_warning_level_tiers_follow_primary_window() {
+        // percent 型且有主窗口：按主窗口 remaining_percent 判级（≤0 红 / <5 黄 / 其余绿）
+        let qs = |v: f64| vec![quota("5小时", v, None)];
+        let p = |v: f64| {
+            let mut s = status_q("CC", Some(balance(62.0, "%")), Some(qs(v)));
+            s.name = "Claude Code".into();
+            s
+        };
+        assert_eq!(quota_warning_level(&p(0.0)), 2);
+        assert_eq!(quota_warning_level(&p(4.9)), 1);
+        assert_eq!(quota_warning_level(&p(5.0)), 0);
+        assert_eq!(quota_warning_level(&p(62.0)), 0);
+        // 无主窗口（quota 缺失）回退 provider_warning_level 语义
+        let mut no_quota = status_q("CC", Some(balance(3.0, "%")), None);
+        no_quota.name = "Claude Code".into();
+        assert_eq!(quota_warning_level(&no_quota), 1);
     }
 
     #[test]
@@ -789,8 +849,6 @@ mod tray_title_tests {
         );
         cc.name = "Claude Code".into();
         let ds = status("DeepSeek", Some(balance(88.0, "CNY")), None); // 现有辅助
-        let mut ds = ds;
-        ds.name = "DeepSeek".into();
         let s = UsageSummary {
             providers: vec![cc, ds],
             ..Default::default()
@@ -883,6 +941,25 @@ mod countdown_tests {
         );
         // 均无
         assert_eq!(quota_countdown_menu(&q(None, None), now), None);
+    }
+
+    #[test]
+    fn quota_countdown_expired_reset_at_omits_without_fallback() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 31, 12, 0, 0).unwrap();
+        // reset_at 已过期：按 spec §5.4「已过期→省略」，不回退陈旧 reset_time 文本
+        let expired = q(Some("2026-10-31T11:00:00Z"), Some("12分钟后重置"));
+        assert_eq!(quota_countdown_menu(&expired, now), None);
+        assert_eq!(quota_countdown_compact(&expired, now), None);
+        // reset_at 解析失败：回退 reset_time 文本（与缺失同路）
+        let unparseable = q(Some("garbage"), Some("12分钟后重置"));
+        assert_eq!(
+            quota_countdown_menu(&unparseable, now).as_deref(),
+            Some("12分钟后重置")
+        );
+        assert_eq!(
+            quota_countdown_compact(&unparseable, now).as_deref(),
+            Some("12分钟后重置")
+        );
     }
 }
 

@@ -158,8 +158,11 @@ impl LlmProvider for KimiCodeProvider {
                 current_value: None,
                 remaining: Some(100.0 - used_pct),
                 remaining_percent: 100.0 - used_pct,
+                // 订阅余额行：expire_time 是「订阅到期」而非「窗口重置」，
+                // 不写入 reset_at（否则倒计时/主窗口并列排序会把到期当重置）；
+                // reset_time 保留到期时间的文本回退展示
                 reset_time: sb.expire_time.as_ref().map(|s| format_iso_reset(s)),
-                reset_at: sb.expire_time.clone(),
+                reset_at: None,
                 plan_label: Some("Kimi Code".to_string()),
             });
         }

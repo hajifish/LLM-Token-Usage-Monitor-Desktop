@@ -37,14 +37,15 @@ pub(crate) struct ProviderMenuBlock {
 /// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
 const DETAIL_INDENT: &str = "  ";
 
-/// 菜单块状态点：沿用告警级别规则；数据获取失败（无 balance）显示黄点，
-/// 与「无数据」的绿点区分（provider_warning_level 对 balance=None 一律 0，
+/// 菜单块状态点：与状态栏标题同源，percent 型按主窗口判级（quota_warning_level）；
+/// 数据获取失败（无 balance）显示黄点，与「无数据」的绿点区分
+/// （balance=None 时 quota_warning_level 回退 provider_warning_level 一律 0，
 /// 该规则同时被状态栏/图标告警消费，不宜为本处单独放宽）
 fn block_dot(p: &ProviderStatus) -> &'static str {
     let level = if p.balance.is_none() && p.error.is_some() {
         1
     } else {
-        crate::tray::provider_warning_level(p)
+        crate::tray::quota_warning_level(p)
     };
     status_dot(level)
 }
@@ -393,6 +394,10 @@ async fn poll_providers(
                     if balance.is_cny() {
                         total_balance += balance.available_balance;
                     }
+                    // 瞬时拉取失败 → None → 签名变化 → 菜单整体重建（恢复时再建一次）：
+                    // 这是「结构如实反映数据」与「避免重建 churn」的既有权衡。quota/usage
+                    // 为可选增强（余额仍展示），失败不阻塞主流程；若网络不稳环境出现高频
+                    // 重建，可引入上轮 quota 名序列的滞后缓存来抑制抖动。
                     let quota_infos = provider.fetch_quota_infos().await.ok().flatten();
                     let usage = provider.fetch_usage().await.ok().flatten();
                     provider_statuses.push(ProviderStatus {
@@ -533,9 +538,17 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                         for (item, text) in block.details.iter().zip(b.details.iter()) {
                             let _ = item.set_text(text);
                         }
+                        // usage 行出现/消失不改变签名（quota 名序列不变），zip 只覆盖
+                        // 交集，剩余旧句柄须显式清空，避免「今日…」行残留陈旧文案
+                        for item in block.details.iter().skip(b.details.len()) {
+                            let _ = item.set_text("");
+                        }
                         if let Some((_, extra_items)) = &block.extra {
                             for (item, text) in extra_items.iter().zip(b.extra_windows.iter()) {
                                 let _ = item.set_text(text);
+                            }
+                            for item in extra_items.iter().skip(b.extra_windows.len()) {
+                                let _ = item.set_text("");
                             }
                         }
                     }
@@ -579,6 +592,10 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 false,
                 None::<&str>,
             ) else {
+                // title 创建失败跳过整块：provider_blocks 与 summary.providers 从此失去
+                // 1:1 对应，原地刷新的 zip 会整体错位、把文案写到别的供应商行上。该失败
+                // 为极端路径（MenuItem 创建几乎不会失败），沿用既有实现「供应商展示项
+                // 可忽略」的权衡（spec §6），不做部分降级。
                 continue;
             };
             let _ = menu.append(&title);
@@ -1085,6 +1102,26 @@ mod tests {
         );
         let p2 = status_full("X", "X", None, None, None);
         assert_eq!(provider_menu_block(&p2, fixed_now()).title, "🟢 X — 无数据");
+    }
+
+    #[test]
+    fn block_dot_follows_primary_window_level() {
+        // balance 62% 平静，但主窗口（7天Opus 剩 3%，<5 黄档）才是显示值：
+        // 状态点须按主窗口判级为 🟡，不能再用 balance 判成 🟢（与 ⚠️ 同源）
+        let b = crate::models::BalanceData {
+            provider: "Claude Code".into(),
+            available_balance: 62.0,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 62.0,
+            currency: "%".into(),
+        };
+        let quotas = vec![quota("5小时", 38.0, None), quota("7天Opus", 97.0, None)];
+        let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
+        assert_eq!(
+            provider_menu_block(&p, fixed_now()).title,
+            "🟡 Max工作 — 剩 3%"
+        );
     }
 
     #[test]

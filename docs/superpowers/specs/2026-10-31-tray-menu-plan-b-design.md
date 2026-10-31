@@ -100,6 +100,7 @@ pub reset_at: Option<String>,
   - percent 型，告警（level ≥ 1）：`⚠️ CC 9% · 12分`（倒计时紧凑格式；沿用 PR #61 已建立的 `⚠️` 前缀，不引入新符号）
   - API 型：`DS ¥88.88`，告警加 `⚠️` 前缀
 - 无候选 → `None`（纯图标，现状不变）。
+- 告警判定（⚠️/菜单状态点）与 V3 显示值同源：percent 型按主窗口（§5.2 选中者）remaining_percent 以同阈值判定（`quota_warning_level`），无主窗口时回退 balance（`provider_warning_level`）；图标角标通道（`worst_warning`）维持原语义不变。
 - 菜单栏文本无法着色，告警语义仅由 `⚠️` 字符承载（原生限制，已与用户确认）。
 
 ### 5.4 倒计时格式化（新增纯函数，菜单与菜单栏共用）
@@ -112,7 +113,7 @@ pub reset_at: Option<String>,
 
 - 块内条目数与子菜单存在性随窗口数变化 → 签名扩展为 `name|alias|q1,q2,…`（quota 名有序序列）。签名变化才整体重建，否则原地 `set_text`（含子菜单内条目）。
 - `TrayMenuHandles` 结构调整为块状：`Vec<ProviderBlock { title_item, detail_item, extra_submenu: Option<(Submenu, Vec<MenuItem>)> }>` + `time_item`。
-- 原地刷新并发安全性要求不变（绝不 `set_menu` 替换活动菜单）；50 条上限与溢出提示机制按「菜单项数」沿用。
+- 原地刷新并发安全性要求不变（绝不 `set_menu` 替换活动菜单）；50 条上限与溢出提示机制按「供应商块数（50）」沿用——上限计数的是供应商块（`MAX_PROVIDER_BLOCKS`），而非全部菜单项数（块内明细行/子菜单条目不计入）。
 
 ### 5.6 阈值
 

@@ -79,7 +79,11 @@ fn normalize_time(v: Option<&Value>) -> Option<String> {
 
 /// epoch 秒/毫秒 → RFC3339；Qoder 实测下发毫秒，<10^12 防御性按秒解释
 fn epoch_to_rfc3339(ts: i64) -> Option<String> {
-    let secs = if ts > 1_000_000_000_000 { ts / 1000 } else { ts };
+    let secs = if ts > 1_000_000_000_000 {
+        ts / 1000
+    } else {
+        ts
+    };
     DateTime::from_timestamp(secs, 0).map(|dt| dt.to_rfc3339())
 }
 
@@ -132,7 +136,9 @@ fn package_row(p: &DedicatedPackage, plan_label: &str) -> Option<QuotaInfo> {
         current_value: Some(p.remaining),
         remaining: Some(p.remaining),
         remaining_percent: remaining_percent_of(p.total, p.remaining),
-        reset_time: normalize_time(p.expires_at.as_ref()).as_deref().map(format_iso_reset),
+        reset_time: normalize_time(p.expires_at.as_ref())
+            .as_deref()
+            .map(format_iso_reset),
         reset_at: None,
         plan_label: Some(plan_label.to_string()),
     })
@@ -262,8 +268,7 @@ impl QoderProvider {
             .map_err(|e| StepError::Network(e.to_string()))?;
 
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(StepError::AuthDenied);
         }
         if !status.is_success() {
@@ -275,7 +280,9 @@ impl QoderProvider {
             .map_err(|e| StepError::Parse(e.to_string()))?;
         match data.get("token").and_then(|v| v.as_str()) {
             Some(t) if !t.is_empty() => Ok(t.to_string()),
-            _ => Err(StepError::Parse("jobToken 兑换响应缺 token 字段".to_string())),
+            _ => Err(StepError::Parse(
+                "jobToken 兑换响应缺 token 字段".to_string(),
+            )),
         }
     }
 
@@ -297,8 +304,7 @@ impl QoderProvider {
             .map_err(|e| StepError::Network(e.to_string()))?;
 
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(StepError::AuthDenied);
         }
         if !status.is_success() {
@@ -420,13 +426,19 @@ mod tests {
         assert_eq!(plan.name, "计划额度");
         assert!((plan.remaining_percent - 80.0).abs() < 1e-9);
         assert_eq!(plan.current_value, Some(800.0));
-        assert!(plan.reset_at.is_some(), "计划额度行必须有 reset_at 参与倒计时");
+        assert!(
+            plan.reset_at.is_some(),
+            "计划额度行必须有 reset_at 参与倒计时"
+        );
         assert!(plan.reset_time.is_some());
         assert_eq!(plan.plan_label.as_deref(), Some("Pro"));
 
         assert_eq!(rows[1].name, "加量包");
         assert!((rows[1].remaining_percent - 90.0).abs() < 1e-9);
-        assert!(rows[1].reset_at.is_none(), "无 resetTime 时 reset_at 应为 None");
+        assert!(
+            rows[1].reset_at.is_none(),
+            "无 resetTime 时 reset_at 应为 None"
+        );
 
         let pkg = &rows[2];
         assert_eq!(pkg.name, "SOTA 专属积分");
@@ -490,8 +502,12 @@ mod tests {
         assert!(should_switch_region(&StepError::AuthDenied));
         assert!(should_switch_region(&StepError::Http(404)));
         assert!(!should_switch_region(&StepError::Http(500)));
-        assert!(!should_switch_region(&StepError::Network("timeout".to_string())));
-        assert!(!should_switch_region(&StepError::Parse("bad json".to_string())));
+        assert!(!should_switch_region(&StepError::Network(
+            "timeout".to_string()
+        )));
+        assert!(!should_switch_region(&StepError::Parse(
+            "bad json".to_string()
+        )));
     }
 
     // ---- 错误文案可操作 ----

@@ -144,9 +144,12 @@ function Settings({ onBack }: SettingsProps) {
     const a = (p.alias || '').trim();
     return `${p.name}|${a === '' ? p.name : a}`;
   };
-  const applyTrayDisplay = async (
-    patch: { master?: boolean; providerIndex?: number; providerName?: string; value: boolean },
-  ) => {
+  const applyTrayDisplay = async (patch: {
+    master?: boolean;
+    providerIndex?: number;
+    providerName?: string;
+    value: boolean;
+  }) => {
     setTrayBusy(true);
     try {
       const fresh = await invoke<AppConfig>('get_config');
@@ -204,7 +207,14 @@ function Settings({ onBack }: SettingsProps) {
       ...config,
       providers: [
         ...config.providers,
-        { name: def.value, api_key: '', enabled: true, platform_token: null, alias: null, show_in_tray: true },
+        {
+          name: def.value,
+          api_key: '',
+          enabled: true,
+          platform_token: null,
+          alias: null,
+          show_in_tray: true,
+        },
       ],
     });
   };

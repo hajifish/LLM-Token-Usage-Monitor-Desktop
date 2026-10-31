@@ -277,6 +277,12 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     let _ = window.emit("navigate", "settings");
                 }
             }
+            id if id.starts_with("interval_") => {
+                // 托盘「刷新间隔」预设档直选：持久化并唤醒调度器立即生效
+                if let Ok(secs) = id.trim_start_matches("interval_").parse::<u64>() {
+                    crate::scheduler::set_refresh_interval(app, secs);
+                }
+            }
             _ => {}
         })
         .build(app)?;
@@ -328,7 +334,6 @@ mod tray_title_tests {
             providers,
             refresh_interval: 60,
             auto_check_update: true,
-            skipped_update_version: None,
             tray_text_enabled: true,
         }
     }

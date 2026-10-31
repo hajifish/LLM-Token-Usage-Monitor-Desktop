@@ -1,8 +1,9 @@
+use crate::config::ConfigHealth;
 use crate::models::{AppConfig, BalanceData, ProviderStatus, UsageSummary};
 use crate::providers;
 use std::sync::Arc;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, Wry,
 };
 use tokio::sync::{Notify, RwLock};
@@ -85,6 +86,46 @@ fn update_time_text(summary: &UsageSummary) -> String {
         .unwrap_or_else(|| summary.last_updated.clone())
 }
 
+/// 托盘「刷新间隔」预设档（与设置页 REFRESH_OPTIONS 保持一致）。
+const REFRESH_INTERVAL_OPTIONS: &[u64] = &[30, 60, 120, 300, 600];
+
+/// 刷新间隔档位的菜单文案。
+fn interval_label(secs: u64) -> String {
+    match secs {
+        30 => "30 秒".to_string(),
+        60 => "1 分钟".to_string(),
+        120 => "2 分钟".to_string(),
+        300 => "5 分钟".to_string(),
+        600 => "10 分钟".to_string(),
+        other => format!("{} 秒", other),
+    }
+}
+
+/// 托盘菜单点击「刷新间隔」档位：持久化到配置并唤醒调度器立即生效。
+/// 勾选标记由下一次 update_tray_menu 原地同步（配置变更会立即触发轮询）。
+pub fn set_refresh_interval(app: &AppHandle, secs: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let (Some(config_state), Some(health_state), Some(notify)) = (
+            app.try_state::<Arc<RwLock<AppConfig>>>(),
+            app.try_state::<Arc<RwLock<ConfigHealth>>>(),
+            app.try_state::<Arc<Notify>>(),
+        ) {
+            let mut new_config = config_state.read().await.clone();
+            new_config.refresh_interval = secs;
+            if let Err(e) =
+                crate::commands::persist_config(&app, &config_state, &health_state, new_config)
+                    .await
+            {
+                log::warn!("Failed to set refresh interval: {}", e);
+                return;
+            }
+            log::info!("刷新间隔已设置为 {} 秒", secs);
+            notify.notify_one();
+        }
+    });
+}
+
 /// 托盘菜单条目句柄。菜单只构建一次，数据轮询仅原地 set_text 改写文案，
 /// 不再 set_menu 整体替换菜单对象 —— 替换与用户菜单交互并发时 AppKit
 /// 会在动作分发中 panic（06337ea 对「检查更新」条目已用同一模式修复，
@@ -98,6 +139,7 @@ pub struct TrayMenuState {
 struct TrayMenuHandles {
     provider_items: Vec<MenuItem<Wry>>,
     time_item: Option<MenuItem<Wry>>,
+    interval_items: Vec<(u64, CheckMenuItem<Wry>)>,
     signature: String,
 }
 
@@ -320,6 +362,10 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                     if let Some(time_item) = &handles.time_item {
                         let _ = time_item.set_text(&format!("更新于 {}", update_time_text(summary)));
                     }
+                    // 同步刷新间隔勾选标记（配置可能在设置页被改动）
+                    for (secs, item) in &handles.interval_items {
+                        let _ = item.set_checked(*secs == tray_config.refresh_interval);
+                    }
                     return;
                 }
             }
@@ -388,6 +434,27 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             time_item_handle = Some(time_item);
         }
 
+        // 4.5) 刷新间隔子菜单（仿 Traffic Monitor 的预设档直选，勾选当前档；
+        //      点击经 set_refresh_interval 持久化，勾选标记随下一次轮询原地同步）
+        let mut interval_items = Vec::new();
+        if let Ok(submenu) = Submenu::new(app_handle, "刷新间隔", true) {
+            for secs in REFRESH_INTERVAL_OPTIONS {
+                let checked = *secs == tray_config.refresh_interval;
+                if let Ok(item) = CheckMenuItem::with_id(
+                    app_handle,
+                    format!("interval_{}", secs),
+                    interval_label(*secs),
+                    true,
+                    checked,
+                    None::<&str>,
+                ) {
+                    let _ = submenu.append(&item);
+                    interval_items.push((*secs, item));
+                }
+            }
+            let _ = menu.append(&submenu);
+        }
+
         // 5) 分隔线 → 打开主页
         let Ok(separator1) = PredefinedMenuItem::separator(app_handle) else {
             return;
@@ -440,6 +507,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let handles = TrayMenuHandles {
                 provider_items,
                 time_item: time_item_handle,
+                interval_items,
                 signature,
             };
             match app_handle.try_state::<TrayMenuState>() {

@@ -193,6 +193,25 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
+  /** 低余额通知开关即时生效：读最新配置 → 仅改本字段 → 落盘。
+   *  与 applyTrayDisplay 同模式：不经「保存」按钮，后端写入成功才同步本地状态。 */
+  const [notifBusy, setNotifBusy] = useState(false);
+  const applyNotificationEnabled = async (value: boolean) => {
+    setNotifBusy(true);
+    try {
+      const fresh = await invoke<AppConfig>('get_config');
+      fresh.notifications_enabled = value;
+      await invoke('save_config', { newConfig: fresh });
+      setConfig((cur) => (cur ? { ...cur, notifications_enabled: value } : cur));
+    } catch (e) {
+      // 失败不静默：走 toast 通道；本地状态不翻转，受控 checkbox 回弹到真实值
+      setMessage(`通知设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
+    } finally {
+      setNotifBusy(false);
+    }
+  };
+
   const updateProvider = (index: number, field: keyof ProviderConfig, value: string | boolean) => {
     if (!config) return;
     const newProviders = [...config.providers];
@@ -385,6 +404,27 @@ function Settings({ onBack }: SettingsProps) {
             )}
             <span className="update-hint">
               开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
+            </span>
+          </div>
+        </div>
+
+        {/* 低余额通知 */}
+        <div className="settings-section">
+          <h3>低余额通知</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">余额/配额告警恶化时弹系统通知</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.notifications_enabled}
+                  disabled={notifBusy}
+                  onChange={(e) => applyNotificationEnabled(e.target.checked)}
+                />
+              </label>
+            </div>
+            <span className="update-hint">
+              开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
             </span>
           </div>
         </div>

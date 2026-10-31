@@ -72,15 +72,18 @@ fn short_window(name: &str) -> String {
         .replace("天Sonnet", "D Sonnet")
         .replace("天", "D")
         .replace("每周", "W")
+        .replace("周", "W")
         .replace("窗口", "")
 }
 
 /// 单个 quota 窗口的菜单明细行：进度条前置（多窗口时条形纵向对齐）
 fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
+    // 已用比例：优先 used/total；total 缺失（如智谱不返回 limit 字段，total=0）时
+    // 从 remaining_percent 反推，保证进度条仍有意义（used 是绝对量、total=0 时无意义）
     let used_pct = if q.total > 0.0 {
-        q.used / q.total * 100.0
+        (q.used / q.total * 100.0).clamp(0.0, 100.0)
     } else {
-        0.0
+        (100.0 - q.remaining_percent).clamp(0.0, 100.0)
     };
     let bar = progress_bar(used_pct, 10);
     let name = short_window(&q.name);
@@ -1039,6 +1042,41 @@ mod tests {
         let block = provider_menu_block(&p, fixed_now());
         assert_eq!(block.title, "🔵 智谱 — 剩 47%");
         assert!(block.details.is_empty());
+    }
+
+    #[test]
+    fn zhipu_style_total_missing_derives_bar_from_remaining() {
+        // 智谱 API 不返回 limit（total=0、used 为绝对量）：
+        // 进度条须从 remaining_percent 反推已用（剩 35% → 已用 65% → ceil 7 格），
+        // 不能算成 0% 全空条
+        let b = crate::models::BalanceData {
+            provider: "Zhipu".into(),
+            available_balance: 35.0,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 35.0,
+            currency: "%".into(),
+        };
+        let quotas = vec![
+            {
+                let mut q = quota("5H", 12000.0, None);
+                q.total = 0.0;
+                q.remaining_percent = 35.0;
+                q
+            },
+            {
+                let mut q = quota("周", 60000.0, None);
+                q.total = 0.0;
+                q.remaining_percent = 35.0;
+                q
+            },
+        ];
+        let p = status_full("Zhipu", "智谱", Some(b), Some(quotas), None);
+        let block = provider_menu_block(&p, fixed_now());
+        assert_eq!(block.title, "🔵 智谱 — 剩 35%");
+        assert_eq!(block.details.len(), 2);
+        assert_eq!(block.details[0], "  [■■■■■■■□□□] 5H · 剩 35%");
+        assert!(block.details[1].starts_with("  [■■■■■■■□□□] W"));
     }
 
     #[test]

@@ -4,7 +4,10 @@ use crate::providers;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{
+        CheckMenuItem, IconMenuItem, IconMenuItemBuilder, Menu, MenuItem, PredefinedMenuItem,
+        Submenu,
+    },
     AppHandle, Emitter, Manager, Wry,
 };
 use tokio::sync::{Notify, RwLock};
@@ -22,20 +25,22 @@ fn progress_bar(percent: f64, width: usize) -> String {
     format!("[{}{}]", "■".repeat(filled), "□".repeat(empty))
 }
 
-/// 供应商身份徽章（彩色圆点，对应设计稿品牌色）。
-/// 原生菜单文本无法着色，彩色 emoji 是唯一的「供应商识别色」载体。
-fn identity_badge(name: &str) -> &'static str {
-    match name {
-        "Claude Code" => "🟠",
-        "Codex" => "🟣",
-        "Zhipu" => "🔵",
-        "Kimi Code" => "💗",
-        "Kimi API" => "💠",
-        "DeepSeek" => "🔷",
-        "OpenAI" => "🟢",
-        "Anthropic" => "🟤",
-        _ => "⚪",
-    }
+/// 供应商菜单 logo（64px PNG，经 Google favicon 服务抓取各家官方标识）。
+/// 内嵌进二进制；未收录类型返回 None（无图标条目）。身份视觉由菜单条目图标
+/// 承载（IconMenuItem），不再依赖文字内 emoji 徽章。
+fn provider_logo(name: &str) -> Option<&'static [u8]> {
+    let bytes: &[u8] = match name {
+        "Claude Code" => include_bytes!("../icons/providers/claude.png"),
+        "Codex" => include_bytes!("../icons/providers/codex.png"),
+        "Zhipu" => include_bytes!("../icons/providers/zhipu.png"),
+        "Kimi Code" => include_bytes!("../icons/providers/kimicode.png"),
+        "Kimi API" => include_bytes!("../icons/providers/kimiapi.png"),
+        "DeepSeek" => include_bytes!("../icons/providers/deepseek.png"),
+        "OpenAI" => include_bytes!("../icons/providers/openai.png"),
+        "Anthropic" => include_bytes!("../icons/providers/anthropic.png"),
+        _ => return None,
+    };
+    Some(bytes)
 }
 
 /// 标题行告警后缀：与状态栏标题同源（percent 型按主窗口 quota_warning_level）；
@@ -140,7 +145,6 @@ fn usage_line(u: &UsageData) -> Option<String> {
 /// 供应商 → 菜单块。percent 型消费 quota_infos（标题主指标取主窗口 remaining_percent，
 /// 全部窗口平铺为明细行、保持接口返回顺序）；API 型标题为余额、有 usage 时加今日明细行
 fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBlock {
-    let badge = identity_badge(&p.name);
     let suffix = alert_suffix(p);
     let percent_quota = p
         .balance
@@ -151,10 +155,7 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
     if let Some(quotas) = percent_quota {
         if let Some(primary) = crate::tray::primary_quota(quotas) {
             return ProviderMenuBlock {
-                title: format!(
-                    "{} {} — {:.0}%{}",
-                    badge, p.alias, primary.remaining_percent, suffix
-                ),
+                title: format!("{} — {:.0}%{}", p.alias, primary.remaining_percent, suffix),
                 details: quotas.iter().map(|q| quota_line(q, now)).collect(),
             };
         }
@@ -162,32 +163,23 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
 
     match &p.balance {
         Some(b) if b.is_percent() => ProviderMenuBlock {
-            title: format!(
-                "{} {} — {:.0}%{}",
-                badge, p.alias, b.available_balance, suffix
-            ),
+            title: format!("{} — {:.0}%{}", p.alias, b.available_balance, suffix),
             details: vec![],
         },
         Some(b) if b.is_usd() => ProviderMenuBlock {
-            title: format!(
-                "{} {} — ${:.2}{}",
-                badge, p.alias, b.available_balance, suffix
-            ),
+            title: format!("{} — ${:.2}{}", p.alias, b.available_balance, suffix),
             details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
         },
         Some(b) => ProviderMenuBlock {
-            title: format!(
-                "{} {} — ¥{:.2}{}",
-                badge, p.alias, b.available_balance, suffix
-            ),
+            title: format!("{} — ¥{:.2}{}", p.alias, b.available_balance, suffix),
             details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
         },
         None if p.error.is_some() => ProviderMenuBlock {
-            title: format!("{} {} — 获取失败{}", badge, p.alias, suffix),
+            title: format!("{} — 获取失败{}", p.alias, suffix),
             details: vec![],
         },
         None => ProviderMenuBlock {
-            title: format!("{} {} — 无数据{}", badge, p.alias, suffix),
+            title: format!("{} — 无数据{}", p.alias, suffix),
             details: vec![],
         },
     }
@@ -296,9 +288,9 @@ pub struct TrayMenuState {
     inner: std::sync::Mutex<Option<TrayMenuHandles>>,
 }
 
-/// 单个供应商块的菜单条目句柄：标题行 + 明细行（全部窗口平铺）
+/// 单个供应商块的菜单条目句柄：标题行（带 logo 图标）+ 明细行（全部窗口平铺）
 struct ProviderMenuHandles {
-    title: MenuItem<Wry>,
+    title: IconMenuItem<Wry>,
     details: Vec<MenuItem<Wry>>,
 }
 
@@ -602,13 +594,17 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             .enumerate()
         {
             let block = provider_menu_block(p, now);
-            let Ok(title) = MenuItem::with_id(
-                app_handle,
-                format!("p{i}_title"),
-                &block.title,
-                true,
-                None::<&str>,
-            ) else {
+            // 标题行用 IconMenuItem：供应商官方 logo 作为条目图标（NSMenuItem.setImage，
+            // 18pt 渲染）；未收录类型无图标。logo 跟随供应商名（签名含 name），
+            // 结构不变时无需 set_icon，仅原地 set_text 刷新文案。
+            let mut title_builder =
+                IconMenuItemBuilder::with_id(format!("p{i}_title"), &block.title).enabled(true);
+            if let Some(logo) = provider_logo(&p.name) {
+                if let Ok(img) = tauri::image::Image::from_bytes(logo) {
+                    title_builder = title_builder.icon(img);
+                }
+            }
+            let Ok(title) = title_builder.build(app_handle) else {
                 // title 创建失败跳过整块：provider_blocks 与 summary.providers 从此失去
                 // 1:1 对应，原地刷新的 zip 会整体错位、把文案写到别的供应商行上。该失败
                 // 为极端路径（MenuItem 创建几乎不会失败），沿用既有实现「供应商展示项
@@ -964,6 +960,25 @@ mod tests {
         assert_eq!(progress_bar(-10.0, 10), "[□□□□□□□□□□]");
     }
 
+    // ---------- provider_logo ----------
+
+    #[test]
+    fn provider_logo_maps_eight_known_types() {
+        for name in [
+            "Claude Code",
+            "Codex",
+            "Zhipu",
+            "Kimi Code",
+            "Kimi API",
+            "DeepSeek",
+            "OpenAI",
+            "Anthropic",
+        ] {
+            assert!(provider_logo(name).is_some(), "{name} 应有 logo");
+        }
+        assert!(provider_logo("Unknown").is_none());
+    }
+
     // ---------- provider_menu_block ----------
 
     fn quota(name: &str, used: f64, reset_at: Option<&str>) -> crate::models::QuotaInfo {
@@ -1020,7 +1035,7 @@ mod tests {
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
         // 标题 = 身份徽章 + 别名 + 主窗口剩余；明细 = 全部窗口平铺（保持接口顺序）
-        assert_eq!(block.title, "🟠 Max工作 — 62%");
+        assert_eq!(block.title, "Max工作 — 62%");
         assert_eq!(block.details.len(), 3);
         assert_eq!(block.details[0], "  [■■■■□□□□□□] 5H · 62% · 1H24M");
         assert!(block.details[1].starts_with("  [■"));
@@ -1040,7 +1055,7 @@ mod tests {
         };
         let p = status_full("Zhipu", "智谱", Some(b), None, None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🔵 智谱 — 47%");
+        assert_eq!(block.title, "智谱 — 47%");
         assert!(block.details.is_empty());
     }
 
@@ -1073,7 +1088,7 @@ mod tests {
         ];
         let p = status_full("Zhipu", "智谱", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🔵 智谱 — 35%");
+        assert_eq!(block.title, "智谱 — 35%");
         assert_eq!(block.details.len(), 2);
         assert_eq!(block.details[0], "  [■■■■■■■□□□] 5H · 35%");
         assert!(block.details[1].starts_with("  [■■■■■■■□□□] W"));
@@ -1099,7 +1114,7 @@ mod tests {
         };
         let p = status_full("DeepSeek", "DeepSeek", Some(b), None, Some(u));
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🔷 DeepSeek — ¥88.88");
+        assert_eq!(block.title, "DeepSeek — ¥88.88");
         assert_eq!(block.details, vec!["  今日 42次 · 1.2M tok"]);
     }
 
@@ -1110,10 +1125,10 @@ mod tests {
         // 获取失败：无 balance → 黄档语义保留为行尾 ⚠️；身份徽章未知类型为 ⚪
         assert_eq!(
             provider_menu_block(&p, fixed_now()).title,
-            "⚪ Kimi — 获取失败 ⚠️"
+            "Kimi — 获取失败 ⚠️"
         );
         let p2 = status_full("X", "X", None, None, None);
-        assert_eq!(provider_menu_block(&p2, fixed_now()).title, "⚪ X — 无数据");
+        assert_eq!(provider_menu_block(&p2, fixed_now()).title, "X — 无数据");
     }
 
     #[test]
@@ -1132,7 +1147,7 @@ mod tests {
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         assert_eq!(
             provider_menu_block(&p, fixed_now()).title,
-            "🟠 Max工作 — 3% ⚠️"
+            "Max工作 — 3% ⚠️"
         );
     }
 

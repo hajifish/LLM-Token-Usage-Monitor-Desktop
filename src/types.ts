@@ -62,7 +62,7 @@ export interface ProviderConfig {
 export interface AppConfig {
   providers: ProviderConfig[];
   refresh_interval: number;
-  /** 是否自动检查更新（启动后 60 秒首查，之后每 24 小时一次）。 */
+  /** 是否自动检查更新（启动后 60 秒首查，之后每小时一次）。 */
   auto_check_update: boolean;
   /** 托盘文字总开关：关闭后菜单栏仅显示图标。 */
   tray_text_enabled: boolean;

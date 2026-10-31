@@ -92,10 +92,6 @@
   pointer-events: none;
 }
 
-.settings-header h2 {
-  pointer-events: none;
-}
-
 .header-time {
   font-size: 11px;
   color: var(--system-tertiary-label);
@@ -452,12 +448,6 @@
   flex-shrink: 0;
 }
 
-.settings-header h2 {
-  flex: 1;
-  font-size: 15px;
-  font-weight: 600;
-}
-
 .back-btn {
   border: none;
   background: none;
@@ -776,10 +766,6 @@ input:focus, select:focus {
   font-size: 11px;
   line-height: 1.4;
   color: var(--system-tertiary-label);
-}
-
-.update-status-line {
-  font-variant-numeric: tabular-nums;
 }
 
 /* ===== Responsive ===== */

@@ -342,7 +342,12 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // --- 状态栏常显文字（菜单栏图标旁的主指标摘要） ---
         let tray_config = match app_handle.try_state::<Arc<RwLock<AppConfig>>>() {
             Some(state) => state.read().await.clone(),
-            None => AppConfig::default(),
+            None => {
+                // 正常启动后必有该状态；走到这里说明时序异常（如状态尚未 manage），
+                // 留痕便于排查，不再完全静默
+                log::warn!("TrayMenuState: 未找到 AppConfig 状态，回退默认配置");
+                AppConfig::default()
+            }
         };
         // 有供应商上状态栏时：只显示文字、隐藏软件 logo；没有任何供应商展示时：
         // 只显示软件 logo（带告警打点）、不显示文字，避免菜单栏重复占用
@@ -437,6 +442,8 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             .enumerate()
         {
             let text = format_provider_line(p);
+            // 注意：此处 continue 会使 provider_items 与 summary.providers 失去 1:1 对应，
+            // 破坏 fast path 原地 zip 对齐的前提；仅当条目创建失败（极端）才会发生
             if let Ok(item) = MenuItem::with_id(
                 app_handle,
                 format!("detail_{}_{}", i, p.alias),

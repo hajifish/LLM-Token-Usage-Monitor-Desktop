@@ -7,6 +7,7 @@ interface SettingsProps {
   onBack: () => void;
 }
 
+// 新增类型时同步 providers/mod.rs::ALL_PROVIDER_TYPES 与 tray.rs::tray_short_code
 const PROVIDER_OPTIONS = [
   { value: 'OpenAI', label: 'OpenAI' },
   { value: 'Codex', label: 'Codex (ChatGPT)' },

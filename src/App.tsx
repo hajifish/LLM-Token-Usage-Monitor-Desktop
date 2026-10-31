@@ -14,7 +14,7 @@ function App() {
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => {});
+    getVersion().then(setAppVersion).catch(console.error);
   }, []);
 
   useEffect(() => {

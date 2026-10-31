@@ -35,7 +35,7 @@ function App() {
                   <img src="/tray-logo.png" alt="" className="app-title-logo" />
                 </span>
                 <span className="app-title-wordmark">
-                  token<span className="wordmark-accent">usage</span>
+                  Token<span className="wordmark-accent">Usage</span>
                 </span>
               </h1>
               <div className="header-actions">

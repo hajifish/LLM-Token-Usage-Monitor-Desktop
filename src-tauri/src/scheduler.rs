@@ -75,14 +75,18 @@ fn provider_signature(summary: &UsageSummary) -> String {
         .join(";")
 }
 
-/// 「更新于 HH:MM」展示文案（取 last_updated 的时:分部分）。
+/// 「更新于 HH:MM」展示文案（取 last_updated 的时:分部分，去掉秒）。
 fn update_time_text(summary: &UsageSummary) -> String {
     summary
         .last_updated
         .split(' ')
         .nth(1)
-        .and_then(|t| t.rsplit_once(':'))
-        .map(|(h, m)| format!("{}:{}", h, m))
+        .and_then(|t| {
+            let mut parts = t.split(':');
+            let h = parts.next()?;
+            let m = parts.next()?;
+            Some(format!("{}:{}", h, m))
+        })
         .unwrap_or_else(|| summary.last_updated.clone())
 }
 
@@ -594,6 +598,74 @@ mod tests {
         };
         let b = a.clone();
         assert_eq!(provider_signature(&a), provider_signature(&b));
+    }
+
+    #[test]
+    fn signature_changes_when_order_differs() {
+        // 原地 zip 对齐不变量：同集合不同顺序必须产生不同签名，
+        // 否则签名命中会让 zip 错位、文案写到别的供应商行上
+        let a = UsageSummary {
+            providers: vec![
+                status_with("DeepSeek", "工作号"),
+                status_with("Zhipu", "智谱"),
+            ],
+            ..Default::default()
+        };
+        let b = UsageSummary {
+            providers: vec![
+                status_with("Zhipu", "智谱"),
+                status_with("DeepSeek", "工作号"),
+            ],
+            ..Default::default()
+        };
+        assert_ne!(provider_signature(&a), provider_signature(&b));
+    }
+
+    // ---------- update_time_text ----------
+
+    #[test]
+    fn update_time_text_extracts_hour_minute() {
+        let s = UsageSummary {
+            last_updated: "2026-10-31 08:00:00".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(update_time_text(&s), "08:00");
+    }
+
+    #[test]
+    fn update_time_text_empty_falls_back_to_raw() {
+        let s = UsageSummary {
+            last_updated: String::new(),
+            ..Default::default()
+        };
+        assert_eq!(update_time_text(&s), "");
+    }
+
+    // ---------- interval_label ----------
+
+    #[test]
+    fn interval_label_maps_all_preset_options() {
+        let cases = [
+            (60, "1 分钟"),
+            (120, "2 分钟"),
+            (180, "3 分钟"),
+            (300, "5 分钟"),
+            (600, "10 分钟"),
+            (1800, "30 分钟"),
+            (3600, "1 小时"),
+            (21600, "6 小时"),
+        ];
+        for (secs, label) in cases {
+            assert_eq!(interval_label(secs), label, "{} 秒档文案应正确", secs);
+        }
+        // 预设档清单与映射表规模一致（8 档全映射）
+        assert_eq!(REFRESH_INTERVAL_OPTIONS.len(), cases.len());
+    }
+
+    #[test]
+    fn interval_label_legacy_30s_falls_back() {
+        // 存量旧配置可能仍存有 30 秒档：回退为「30 秒」而不是 panic
+        assert_eq!(interval_label(30), "30 秒");
     }
 
     // ---------- progress_bar ----------

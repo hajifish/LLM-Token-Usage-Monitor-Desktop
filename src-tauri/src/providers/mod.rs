@@ -11,6 +11,22 @@ pub mod zhipu;
 use crate::models::{BalanceData, QuotaInfo, UsageData};
 use async_trait::async_trait;
 
+/// 内置供应商类型的单一事实源（与 create_provider 的 match 支持集合一致；
+/// "Kimi" 是 Kimi API 的历史别名，由工厂归一化，不在此清单）。
+/// 新增类型时必须同步 tray.rs 的 tray_short_code 与 Settings.tsx 的 PROVIDER_OPTIONS。
+/// 当前仅测试消费（tray.rs 遍历守卫），非测试构建允许暂未使用。
+#[cfg_attr(not(test), allow(dead_code))]
+pub const ALL_PROVIDER_TYPES: &[&str] = &[
+    "OpenAI",
+    "Codex",
+    "Anthropic",
+    "Claude Code",
+    "DeepSeek",
+    "Kimi API",
+    "Kimi Code",
+    "Zhipu",
+];
+
 #[derive(Debug)]
 pub struct ProviderError(pub String);
 

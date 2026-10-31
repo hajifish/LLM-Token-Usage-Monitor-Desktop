@@ -588,6 +588,15 @@ mod tray_title_tests {
     }
 
     #[test]
+    fn every_builtin_provider_type_has_short_code() {
+        // ALL_PROVIDER_TYPES 是类型清单单一事实源：每个内置类型都必须有短码，
+        // 否则菜单栏回退到别名截断，展示退化
+        for t in crate::providers::ALL_PROVIDER_TYPES {
+            assert!(tray_short_code(t).is_some(), "类型 {} 缺少短码", t);
+        }
+    }
+
+    #[test]
     fn alias_with_surrounding_whitespace_still_respects_show_in_tray() {
         // 配置 alias 带前后空白：scheduler 原样保留为 display_alias（未 trim），
         // provider_show_in_tray 必须对两侧都 trim 才能匹配，否则开关静默失效

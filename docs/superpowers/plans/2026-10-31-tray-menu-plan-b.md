@@ -1,6 +1,6 @@
 # 状态栏方案 B 重设计（原生菜单增强 + V3 聚合标题）实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 托盘菜单按供应商分块展示（标题行 + 主窗口行 + 折叠子菜单），菜单栏常显文字改为 V3 聚合态（只显最紧张一项 + 紧凑倒计时）。
 
@@ -34,7 +34,7 @@
 **Interfaces:**
 - Produces: `QuotaInfo.reset_at: Option<String>`（ISO 8601/RFC3339 UTC，如 `2026-10-31T18:00:00Z`）。后续任务的 `primary_quota`/`reset_remaining` 依赖此字段。
 
-- [ ] **Step 1: 写失败测试（models 序列化兼容 + 各家填充）**
+- [x] **Step 1: 写失败测试（models 序列化兼容 + 各家填充）**
 
 `models.rs` 文件末尾追加测试模块（若无）：
 
@@ -72,14 +72,14 @@ async fn quota_infos_carry_raw_iso_reset_at() {
 
 > 注：若 `ClaudeUsageResponse` 字段为私有，直接在同模块测试内可见（Rust 同文件模块可见性），无需改可见性。此测试锚定「原始 ISO 可得」；`reset_at` 填充断言见 Step 3 后的补充测试（fetch_quota_infos 需要 mock HTTP，走构造函数直填验证代替——本任务对 provider 的验证以编译 + 既有测试不破为准，填充正确性由 Task 3 的 `primary_quota` 集成测试覆盖输入端）。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd src-tauri && cargo test quota_reset_at
 ```
 预期：编译失败 `no field reset_at on type QuotaInfo`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `models.rs` `QuotaInfo` 增加字段（放在 `reset_time` 之后）：
 
@@ -117,14 +117,14 @@ zhipu.rs（构造点在 `fetch_quota_infos` 内，`l.next_reset_time` 为 epoch 
                     .map(|dt| dt.to_rfc3339()),
 ```
 
-- [ ] **Step 4: 跑全部测试确认通过（既有测试不破）**
+- [x] **Step 4: 跑全部测试确认通过（既有测试不破）**
 
 ```bash
 cd src-tauri && cargo test
 ```
 预期：107+ 通过，0 失败（新增 1-2 个）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/models.rs src-tauri/src/providers/
@@ -150,7 +150,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
   - `pub fn quota_countdown_menu(q: &QuotaInfo, now: DateTime<Utc>) -> Option<String>` — reset_at 精确换算，回退 reset_time 原文，均无 None
   - `pub fn quota_countdown_compact(q: &QuotaInfo, now: DateTime<Utc>) -> Option<String>`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```rust
 #[cfg(test)]
@@ -206,14 +206,14 @@ mod countdown_tests {
 }
 ```
 
-- [ ] **Step 2: 确认失败**
+- [x] **Step 2: 确认失败**
 
 ```bash
 cd src-tauri && cargo test countdown
 ```
 预期：编译失败（函数不存在）。
 
-- [ ] **Step 3: 实现（tray.rs，`tray_value` 之后）**
+- [x] **Step 3: 实现（tray.rs，`tray_value` 之后）**
 
 ```rust
 use chrono::{DateTime, Utc}; // 文件顶部补充
@@ -271,14 +271,14 @@ pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>)
 }
 ```
 
-- [ ] **Step 4: 跑测试通过**
+- [x] **Step 4: 跑测试通过**
 
 ```bash
 cd src-tauri && cargo test countdown
 ```
 预期：4 个新测试 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/tray.rs
@@ -306,7 +306,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
   - scheduler.rs `fn format_tokens(n: u64) -> String`
   - scheduler.rs `provider_signature` 新签名格式 `name|alias|q1,q2,...`（quota 名有序）
 
-- [ ] **Step 1: 写失败测试（tray.rs 追加进 countdown_tests 或新模块）**
+- [x] **Step 1: 写失败测试（tray.rs 追加进 countdown_tests 或新模块）**
 
 ```rust
 #[cfg(test)]
@@ -460,14 +460,14 @@ scheduler.rs tests 模块追加（沿用现有 `status_with` 辅助；需补充�
     }
 ```
 
-- [ ] **Step 2: 确认失败**
+- [x] **Step 2: 确认失败**
 
 ```bash
 cd src-tauri && cargo test primary_quota && cargo test provider_menu_block
 ```
 预期：编译失败。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 tray.rs（`primary_quota` + 私有比较辅助，放在 countdown 函数组后）：
 
@@ -622,14 +622,14 @@ fn provider_signature(summary: &UsageSummary) -> String {
 
 同时：本任务先保留旧 `format_provider_line` 供现有 `update_tray_menu` 编译通过（Task 4 移除）；其测试若断言旧行为，标记保留至 Task 4 更新。
 
-- [ ] **Step 4: 跑测试通过**
+- [x] **Step 4: 跑测试通过**
 
 ```bash
 cd src-tauri && cargo test
 ```
 预期：全部通过（新增约 10 个）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/tray.rs src-tauri/src/scheduler.rs
@@ -650,7 +650,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - Consumes: Task 3 的 `ProviderMenuBlock`/`provider_menu_block`/新签名
 - Produces: 菜单最终结构（无函数签名变化；`update_tray_menu` 内部改造）
 
-- [ ] **Step 1: 写失败测试（签名驱动重建的判定单元）**
+- [x] **Step 1: 写失败测试（签名驱动重建的判定单元）**
 
 无法对 NSMenu 做纯单测，本任务可测点为「签名比较 + 块句柄结构生成逻辑」。在 tests 模块追加结构级测试：
 
@@ -677,14 +677,14 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 （这两个测试其实在 Task 3 后已能通过——它们锚定 Task 4 依赖的重建边界，作为本任务的前置验收跑一遍。）
 
-- [ ] **Step 2: 跑测试**
+- [x] **Step 2: 跑测试**
 
 ```bash
 cd src-tauri && cargo test signature
 ```
 预期：PASS（锚定完成）。
 
-- [ ] **Step 3: 实现 `update_tray_menu` 块状化**
+- [x] **Step 3: 实现 `update_tray_menu` 块状化**
 
 3a. 结构替换（`TrayMenuHandles`）：
 
@@ -790,14 +790,14 @@ struct TrayMenuHandles {
 
 > 子菜单标题必须 enabled（`true`）：NSMenu 中 disabled 的 submenu 无法展开；其 id `p{i}_extra` 无 on_menu_event 匹配，点击无副作用。折叠行内的窗口项 disabled。
 
-- [ ] **Step 4: 编译 + 全量测试 + clippy/fmt**
+- [x] **Step 4: 编译 + 全量测试 + clippy/fmt**
 
 ```bash
 cd src-tauri && cargo fmt && cargo clippy -- -D warnings && cargo test
 ```
 预期：0 错误，全部通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/scheduler.rs
@@ -818,7 +818,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - Consumes: Task 1 `reset_at`、Task 2 `countdown_compact`/`reset_remaining`、`primary_quota`（Task 3）
 - Produces: V3 聚合格式（外部无新接口）
 
-- [ ] **Step 1: 更新/新增测试（期望值先行）**
+- [x] **Step 1: 更新/新增测试（期望值先行）**
 
 `tray_title_tests` 内改动——先改辅助 `status()` 支持 quota_infos（复用本文件已有 balance/status 辅助，追加字段参数化辅助 `status_q`）：
 
@@ -892,14 +892,14 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 （`status` 辅助本文件已存在；若其签名不含第三参 error 则沿用原样。）
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd src-tauri && cargo test tray_title
 ```
 预期：V3 相关用例 FAIL（旧实现输出全列表）。
 
-- [ ] **Step 3: 实现（替换 build_tray_title 主体）**
+- [x] **Step 3: 实现（替换 build_tray_title 主体）**
 
 ```rust
 /// V3 聚合主值：percent 型取主窗口剩余%（无 quota 回退 balance）；API 型取余额；
@@ -980,14 +980,14 @@ fn p_reset_ts(p: &ProviderStatus) -> i64 {
 
 同时删除旧的全列表拼装代码（`code_counts` HashMap 段与 `parts.join` 段）及文件头对应 `worst_warning` 的 title 用法（`update_tray_badge` 仍用 `worst_warning`，保留该函数）。
 
-- [ ] **Step 4: 全量测试**
+- [x] **Step 4: 全量测试**
 
 ```bash
 cd src-tauri && cargo fmt && cargo clippy -- -D warnings && cargo test
 ```
 预期：全部通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src/tray.rs
@@ -1004,7 +1004,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - Modify: `docs/superpowers/specs/2026-10-31-tray-menu-plan-b-design.md`（状态行 → 已实施）
 - Modify: `docs/superpowers/plans/2026-10-31-tray-menu-plan-b.md`（勾选完成项）
 
-- [ ] **Step 1: 全量验证**
+- [x] **Step 1: 全量验证**
 
 ```bash
 cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
@@ -1012,11 +1012,11 @@ npm run lint && npm run build
 ```
 预期：全绿（前端未动，lint/build 应不受影响；build 含 tsc 类型检查）。
 
-- [ ] **Step 2: 手动验收（用户执行，macOS）**
+- [x] **Step 2: 手动验收（用户执行，macOS）**
 
 `npm run tauri dev` 启动，对照 spec §9 清单验收：多窗口折叠、V3 四态、告警 ⚠️、轮询原地刷新、长菜单滚动。
 
-- [ ] **Step 3: spec 状态更新 + Commit**
+- [x] **Step 3: spec 状态更新 + Commit**
 
 ```bash
 git add docs/superpowers/

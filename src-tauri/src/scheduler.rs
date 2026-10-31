@@ -38,6 +38,7 @@ fn provider_logo(name: &str) -> Option<&'static [u8]> {
         "DeepSeek" => include_bytes!("../icons/providers/deepseek.png"),
         "OpenAI" => include_bytes!("../icons/providers/openai.png"),
         "Anthropic" => include_bytes!("../icons/providers/anthropic.png"),
+        "Qoder" => include_bytes!("../icons/providers/qoder.png"),
         _ => return None,
     };
     Some(bytes)
@@ -963,7 +964,7 @@ mod tests {
     // ---------- provider_logo ----------
 
     #[test]
-    fn provider_logo_maps_eight_known_types() {
+    fn provider_logo_maps_known_types() {
         for name in [
             "Claude Code",
             "Codex",
@@ -973,6 +974,7 @@ mod tests {
             "DeepSeek",
             "OpenAI",
             "Anthropic",
+            "Qoder",
         ] {
             assert!(provider_logo(name).is_some(), "{name} 应有 logo");
         }

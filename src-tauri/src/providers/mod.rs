@@ -26,6 +26,7 @@ pub const ALL_PROVIDER_TYPES: &[&str] = &[
     "Kimi API",
     "Kimi Code",
     "Zhipu",
+    "Qoder",
 ];
 
 /// 供应商类型统一显示名（UI 全系统展示口径；内部类型名是配置键/工厂键，不变）。
@@ -86,6 +87,7 @@ pub fn create_provider(
         "Codex" => Some(Box::new(codex::CodexProvider::new())),
         "Claude Code" => Some(Box::new(claude_code::ClaudeCodeProvider::new())),
         "Kimi Code" => Some(Box::new(kimi_code::KimiCodeProvider::new())),
+        "Qoder" => Some(Box::new(qoder::QoderProvider::new(api_key))),
         _ => None,
     }
 }
@@ -233,6 +235,7 @@ mod tests {
             ("Kimi API", "Kimi API"),
             ("Kimi Code", "Kimi Code"),
             ("Zhipu", "智谱"),
+            ("Qoder", "Qoder"),
         ];
         for (internal, display) in expected {
             assert_eq!(

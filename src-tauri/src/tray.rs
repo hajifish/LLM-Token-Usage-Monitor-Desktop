@@ -127,6 +127,7 @@ fn tray_short_code(name: &str) -> Option<&'static str> {
         "Codex" => Some("CX"),
         "Anthropic" => Some("A"),
         "Claude Code" => Some("CC"),
+        "Qoder" => Some("QD"),
         _ => None,
     }
 }

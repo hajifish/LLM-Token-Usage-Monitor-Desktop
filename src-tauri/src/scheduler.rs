@@ -93,6 +93,17 @@ fn update_time_text(summary: &UsageSummary) -> String {
 /// 托盘「刷新间隔」预设档（最短 1 分钟，避免请求过频）。
 const REFRESH_INTERVAL_OPTIONS: &[u64] = &[60, 120, 180, 300, 600, 1800, 3600, 21600];
 
+/// Provider Drop 卸载到阻塞线程池的并发上限（OnceLock 初始化的模块级信号量）。
+/// 超限说明阻塞线程池已被连接池收敛长时间占满，再排队只会堆积任务。
+static DROP_SEMAPHORE: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::OnceLock::new();
+
+fn drop_semaphore() -> Arc<tokio::sync::Semaphore> {
+    DROP_SEMAPHORE
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(16)))
+        .clone()
+}
+
 /// 刷新间隔档位的菜单文案。
 fn interval_label(secs: u64) -> String {
     match secs {
@@ -124,8 +135,10 @@ pub fn set_refresh_interval(app: &AppHandle, secs: u64) {
                 crate::commands::persist_config(&app, &config_state, &health_state, new_config)
                     .await
             {
-                log::warn!("Failed to set refresh interval: {}", e);
-                return;
+                log::error!("Failed to set refresh interval: {}", e);
+                // 持久化失败时勾选标记仍停在用户点的档位上，与真实配置脱节；
+                // 唤醒一次轮询，fast path 会把勾选标记原地同步回真实配置（可见回弹）
+                notify.notify_one();
             }
             log::info!("刷新间隔已设置为 {} 秒", secs);
             notify.notify_one();
@@ -286,8 +299,22 @@ async fn poll_providers(
             // reqwest 异步 Client 的 Drop 会等待连接池收敛，在代理/热点等
             // 连接僵死的环境下可能无限阻塞（采样证实卡在 ClientRef::drop_slow
             // 的 Condvar 上），且 Drop 不受请求超时保护。卸载到阻塞线程池执行，
-            // 调度任务与后续轮询不受池收敛速度影响。
-            tauri::async_runtime::spawn_blocking(move || drop(provider));
+            // 调度任务与后续轮询不受池收敛速度影响。信号量限制在途 Drop 数量，
+            // 防止僵死 Drop 堆积耗尽线程池、饿死其他 spawn_blocking 任务。
+            match drop_semaphore().try_acquire_owned() {
+                Ok(permit) => {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        drop(provider);
+                        drop(permit);
+                    });
+                }
+                Err(_) => {
+                    // 排队超限：泄漏一个连接池（进程生命周期内不再收敛），
+                    // 保全阻塞线程池供更新安装等关键路径使用——泄漏优于饿死
+                    log::warn!("Provider Drop 排队超限，泄漏一个 HTTP 连接池以保全线程池");
+                    std::mem::forget(provider);
+                }
+            }
         }
     }
 

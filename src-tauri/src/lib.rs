@@ -94,8 +94,12 @@ pub fn run() {
                 let args: Vec<String> = std::env::args().collect();
                 if should_show_window(&args) {
                     if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.show();
+                        if let Err(e) = window.show() {
+                            log::error!("Ready 阶段显示主窗口失败: {}", e);
+                        }
                         let _ = window.set_focus();
+                    } else {
+                        log::error!("Ready 阶段未找到 main 窗口（get_webview_window 为 None）");
                     }
                 }
             }

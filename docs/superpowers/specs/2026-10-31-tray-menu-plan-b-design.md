@@ -1,8 +1,8 @@
 # 状态栏方案 B 重设计：原生菜单增强 + V3 聚合标题 · 设计 spec
 
 - 日期：2026-10-31
-- 状态：待用户评审
-- 分支：`feat/tray-menu-redesign`（基于 `origin/develop` @ 6c3fd84）
+- 状态：已评审通过，实施中（2026-10-31 修订：PR #61 已合入 develop，分支已 rebase 其上；告警字符沿用既有 `⚠️`；新增 `reset_at` ISO 字段支撑紧凑倒计时）
+- 分支：`feat/tray-menu-redesign`（基于 `origin/develop` @ 03c7e55，含 PR #61）
 - 设计草图：`docs/design/status-bar-redesign-mockup.html`（三方案对照与假数据渲染）
 
 ## 1. 背景与目标
@@ -28,16 +28,26 @@
 
 做历史只能本地快照累积（轮询追加快照 + 窗口重置感知差值 + 分桶），成本中等且数据自部署起才有。**本设计不含历史**；将来主页历史可独立立项，若日后升级方案 A（popover 面板），主页积累的快照可直接复用。
 
-## 3. 现状（origin/develop @ 6c3fd84）
+## 3. 现状（origin/develop @ 03c7e55，含 PR #61）
 
-- 调度器已在轮询中拉取 `quota_infos`（`scheduler.rs:212`），四家订阅计划供应商均已实现 `fetch_quota_infos`，**但托盘菜单从未消费该数据**（`format_provider_line` 只读 balance）。
+- 调度器已在轮询中拉取 `quota_infos`，四家订阅计划供应商（Claude Code / Codex / Zhipu / Kimi Code）均已实现 `fetch_quota_infos`，**但托盘菜单从未消费该数据**（`format_provider_line` 只读 balance）。
 - 菜单机制：`TrayMenuState` 一次性构建菜单 + 按签名（`name|alias` 序列）原地 `set_text`，避免 `set_menu` 与菜单交互并发的 AppKit 闪退。本设计沿用该机制。
-- 菜单栏文字 `build_tray_title`：别名截断版（`智谱 70% · DeepSeek ¥88.88`）。
-- **注意**：未合并的 `feat/tray-interval-update-simplify` 分支（远端 50a0947 领先本地）已含类型短码映射（CC/DS/OA…）、logo/文字互斥、刷新间隔子菜单等改动，与本设计改动面重叠。见 §8 实施顺序。
+- 菜单栏文字 `build_tray_title`（PR #61 后）：类型短码（CC/DS/OA…）+ 同码序号 + 全局 `⚠️` 告警前缀（`worst_warning > 0` 时）。V3 聚合在此基础上重写。
+- `UsageData` 仅 DeepSeek 构造（today_cost/requests/tokens），其余 API 型供应商 usage 为 None——API 型明细行按 Option 缺省省略，天然只有 DeepSeek 显示。
+- `QuotaInfo.reset_time` 存的是**已本地化的中文/日期文本**（"12分钟后重置"、"MM-dd HH:mm"），精度不足以支撑紧凑倒计时——见 §4/§5.4 的新字段。
 
-## 4. 数据模型（已有，不改）
+## 4. 数据模型
 
-`QuotaInfo { name, used, total, current_value, remaining, remaining_percent, reset_time: Option<String>(ISO), plan_label }`
+`QuotaInfo` 新增字段（其余不改）：
+
+```rust
+/// 重置时刻（ISO 8601 / RFC3339 UTC），供展示层精确换算倒计时；
+/// 缺失时展示层回退用 reset_time 的本地化文本
+#[serde(default)]
+pub reset_at: Option<String>,
+```
+
+四家订阅计划供应商填充：Claude Code / Kimi Code 直接存 API 返回的原始 ISO 串；Codex 由 Unix 秒、Zhipu 由 epoch 毫秒转换 `to_rfc3339()`。旧字段 `reset_time`（本地化文本）保留，向后兼容既有序列化数据。
 `BalanceData { available_balance, currency: "%" | "USD" | "CNY", voucher_balance, cash_balance, … }`
 `UsageData { total_tokens, prompt_tokens, completion_tokens, today_cost: Option, today_requests: Option }`
 `ProviderStatus { name, alias, enabled, balance, usage, error, quota_infos: Option<Vec<QuotaInfo>> }`
@@ -68,7 +78,7 @@
 
 **主窗口行**（percent 型且 `quota_infos` 非空）：`{窗口名} {进度条} 剩{x}% · {倒计时}`
 - 窗口名：`QuotaInfo.name` 原值（5小时 / 7天 / 7天Opus…，菜单内用原值，不缩写）。
-- 进度条：10 格 `▓`/`░`，`▓` 数 = round(used / total × 10)；已用越多 `▓` 越多；沿用现有 `progress_bar` 函数。
+- 进度条：沿用现有 `progress_bar`（10 格 `█`/`░`，`█` 数 = round(used / total × 10)；已用越多越满）。
 - 倒计时：见 5.4；缺 reset_time 则省略 ` · {倒计时}` 段。
 
 **折叠子菜单**（quotas.len() > 1）：一个 Submenu 项 `其余 {n-1} 个窗口`，内含其余窗口各一行（格式同主窗口行）。子菜单标题行本身为 disabled 展示项。
@@ -87,16 +97,16 @@
 - 排序取第一：`warning_level` 降序 →（同 level）percent 型按剩余% 升序在前，非 percent 型随后按余额升序 →（仍并列）主窗口（§5.2 选中者）reset_time 更近在前。
 - 格式（短码沿用 `tray_short_code` 映射，未收录类型回退别名截断）：
   - percent 型，平静态：`CC 62%`
-  - percent 型，告警（level ≥ 1）：`⚡ CC 9% · 12分`（倒计时紧凑格式）
-  - API 型：`DS ¥88.88`，告警加 `⚡` 前缀
+  - percent 型，告警（level ≥ 1）：`⚠️ CC 9% · 12分`（倒计时紧凑格式；沿用 PR #61 已建立的 `⚠️` 前缀，不引入新符号）
+  - API 型：`DS ¥88.88`，告警加 `⚠️` 前缀
 - 无候选 → `None`（纯图标，现状不变）。
-- 菜单栏文本无法着色，告警语义仅由 `⚡` 字符承载（原生限制，已与用户确认）。
+- 菜单栏文本无法着色，告警语义仅由 `⚠️` 字符承载（原生限制，已与用户确认）。
 
 ### 5.4 倒计时格式化（新增纯函数，菜单与菜单栏共用）
 
-输入 `Option<String>` ISO 时间：解析失败/缺失 → None（省略倒计时段）；已过期（≤0）→ 省略（等待下轮刷新）。
+输入 `reset_at`（ISO 8601）：解析失败/缺失 → 回退 `reset_time` 原文（如「12分钟后重置」）；两者皆无 → 省略倒计时段；已过期（≤0）→ 省略（等待下轮刷新）。
 - 菜单格式：<1h → `X分后重置`；<24h → `X小时Y分后重置`；≥24h → `X天Y小时后重置`。
-- 菜单栏紧凑格式：<1h → `X分`；<24h → `X:YY`；≥24h → `Xd`。
+- 菜单栏紧凑格式：<1h → `X分`；<24h → `X:YY`（如 4:23）；≥24h → `Xd`（如 3d）。
 
 ### 5.5 菜单句柄与签名扩展（`TrayMenuHandles` / `provider_signature`）
 
@@ -125,14 +135,9 @@
 5. 签名扩展：窗口数变化 → 签名变化；仅数值变化 → 签名不变。
 6. 进度条格数与 tokens 格式化的边界值。
 
-## 8. 实施顺序与依赖（需用户确认）
+## 8. 实施顺序与依赖（已解决，2026-10-31）
 
-`feat/tray-interval-update-simplify`（远端 50a0947）与本设计改动面重叠（build_tray_title、tray 菜单）。两个选项：
-
-- **推荐**：先收尾并合入该分支（其短码映射、间隔子菜单是本设计的组成部分），本设计在其之上实施，冲突最小；
-- 或本设计独立实施，短码映射等在本分支重新引入，合并时解决冲突。
-
-另：本地 `develop` 与 `origin/develop` 已分叉（本地多 2 个更名提交未推送，远端多 4 个提交），需用户自行处理后再走 PR。
+PR #61（feat/tray-interval-update-simplify）已合入 `origin/develop`（@ 03c7e55），本分支已 rebase 其上——短码映射、`⚠️` 前缀、刷新间隔子菜单直接复用，无遗留依赖。本地 `develop` 与远端的分叉已由并行会话处理完毕。
 
 ## 9. 验收清单（人工）
 

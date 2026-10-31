@@ -13,8 +13,10 @@ use tokio::time::Duration;
 /// 生成 Unicode 进度条，如 [■■■■□□□□□□]（实心=已用，空心=未用）。
 /// 空位用 □ 而非 ░：░ 在亮色菜单上近乎隐形（低用量时整条进度条消失），
 /// □ 的描边在明暗两种外观下均可辨识，且与实心块等宽对齐。
+/// 实心格数向上取整：只要有用量就至少亮 1 格（round 会把 <5% 全部舍成 0 格，
+/// 用户消耗后看不到任何进度反馈）。
 fn progress_bar(percent: f64, width: usize) -> String {
-    let filled = (percent / 100.0 * width as f64).round() as usize;
+    let filled = (percent / 100.0 * width as f64).ceil() as usize;
     let filled = filled.min(width);
     let empty = width.saturating_sub(filled);
     format!("[{}{}]", "■".repeat(filled), "□".repeat(empty))
@@ -60,6 +62,19 @@ pub(crate) struct ProviderMenuBlock {
 /// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
 const DETAIL_INDENT: &str = "  ";
 
+/// 配额窗口名紧凑化：5小时→5H、7天→7D、5小时窗口→5H、7天Opus→7D Opus。
+/// 「订阅余额」等无单位词的名称原样保留。
+fn short_window(name: &str) -> String {
+    name.replace("小时窗口", "H")
+        .replace("天窗口", "D")
+        .replace("小时", "H")
+        .replace("天Opus", "D Opus")
+        .replace("天Sonnet", "D Sonnet")
+        .replace("天", "D")
+        .replace("每周", "W")
+        .replace("窗口", "")
+}
+
 /// 单个 quota 窗口的菜单明细行：进度条前置（多窗口时条形纵向对齐）
 fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
     let used_pct = if q.total > 0.0 {
@@ -68,14 +83,15 @@ fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
         0.0
     };
     let bar = progress_bar(used_pct, 10);
-    match crate::tray::quota_countdown_menu(q, now) {
+    let name = short_window(&q.name);
+    match crate::tray::quota_countdown_compact(q, now) {
         Some(cd) => format!(
             "{DETAIL_INDENT}{} {} · 剩 {:.0}% · {}",
-            bar, q.name, q.remaining_percent, cd
+            bar, name, q.remaining_percent, cd
         ),
         None => format!(
             "{DETAIL_INDENT}{} {} · 剩 {:.0}%",
-            bar, q.name, q.remaining_percent
+            bar, name, q.remaining_percent
         ),
     }
 }
@@ -1003,13 +1019,10 @@ mod tests {
         // 标题 = 身份徽章 + 别名 + 主窗口剩余；明细 = 全部窗口平铺（保持接口顺序）
         assert_eq!(block.title, "🟠 Max工作 — 剩 62%");
         assert_eq!(block.details.len(), 3);
-        assert_eq!(
-            block.details[0],
-            "  [■■■■□□□□□□] 5小时 · 剩 62% · 1小时24分后重置"
-        );
+        assert_eq!(block.details[0], "  [■■■■□□□□□□] 5H · 剩 62% · 1H24M");
         assert!(block.details[1].starts_with("  [■"));
-        assert!(block.details[1].contains("7天 · 剩 81%"));
-        assert!(block.details[2].contains("7天Opus · 剩 95%"));
+        assert!(block.details[1].contains("7D · 剩 81% · 3D12H"));
+        assert!(block.details[2].contains("7D Opus · 剩 95%"));
     }
 
     #[test]

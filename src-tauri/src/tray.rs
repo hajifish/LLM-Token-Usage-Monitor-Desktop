@@ -158,57 +158,33 @@ pub fn reset_remaining(iso: &str, now: DateTime<Utc>) -> Option<chrono::Duration
     (d > chrono::Duration::zero()).then_some(d)
 }
 
-/// 菜单明细行倒计时（自然语言），输入为正时长
-pub fn countdown_menu(d: chrono::Duration) -> String {
+/// 紧凑倒计时（菜单与菜单栏共用）：分钟 M、小时 H、天 D，整单位省略低位。
+/// 如 12M / 1H4M / 6D / 3D4H。
+pub fn countdown_compact(d: chrono::Duration) -> String {
     let mins = d.num_minutes().max(1);
     if mins < 60 {
-        format!("{}分钟后重置", mins)
+        format!("{mins}M")
     } else if mins < 24 * 60 {
         let (h, m) = (mins / 60, mins % 60);
         if m == 0 {
-            format!("{}小时后重置", h)
+            format!("{h}H")
         } else {
-            format!("{}小时{}分后重置", h, m)
+            format!("{h}H{m}M")
         }
     } else {
         let hours = d.num_hours();
         let (days, h) = (hours / 24, hours % 24);
         if h == 0 {
-            format!("{}天后重置", days)
+            format!("{days}D")
         } else {
-            format!("{}天{}小时后重置", days, h)
+            format!("{days}D{h}H")
         }
     }
 }
 
-/// 菜单栏紧凑倒计时，输入为正时长
-pub fn countdown_compact(d: chrono::Duration) -> String {
-    let mins = d.num_minutes().max(1);
-    if mins < 60 {
-        format!("{}分", mins)
-    } else if mins < 24 * 60 {
-        format!("{}:{:02}", mins / 60, mins % 60)
-    } else {
-        format!("{}d", d.num_hours() / 24)
-    }
-}
-
-/// QuotaInfo 倒计时（菜单格式）：reset_at 能解析时精确换算——未过期格式化、
+/// QuotaInfo 倒计时（紧凑格式）：reset_at 能解析时精确换算——未过期格式化、
 /// 已过期省略（spec §5.4，不回退陈旧文本）；reset_at 缺失/解析失败才回退
-/// reset_time 原文
-pub fn quota_countdown_menu(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
-    if let Some(iso) = q.reset_at.as_deref() {
-        if let Ok(dt) = iso.parse::<DateTime<Utc>>() {
-            let d = dt.signed_duration_since(now);
-            return (d > chrono::Duration::zero()).then(|| countdown_menu(d));
-        }
-    }
-    q.reset_time.clone()
-}
-
-/// QuotaInfo 倒计时（菜单栏紧凑格式）：同上回退策略
-/// 当前仅测试消费（紧凑菜单行未接入），非测试构建允许暂未使用。
-#[cfg_attr(not(test), allow(dead_code))]
+/// reset_time 原文（provider 层同样输出紧凑格式）
 pub fn quota_countdown_compact(q: &crate::models::QuotaInfo, now: DateTime<Utc>) -> Option<String> {
     if let Some(iso) = q.reset_at.as_deref() {
         if let Ok(dt) = iso.parse::<DateTime<Utc>>() {
@@ -888,27 +864,14 @@ mod countdown_tests {
     }
 
     #[test]
-    fn menu_format_boundaries() {
-        assert_eq!(countdown_menu(Duration::minutes(12)), "12分钟后重置");
-        assert_eq!(countdown_menu(Duration::minutes(60)), "1小时后重置");
-        assert_eq!(
-            countdown_menu(Duration::minutes(4 * 60 + 23)),
-            "4小时23分后重置"
-        );
-        assert_eq!(countdown_menu(Duration::hours(24)), "1天后重置");
-        assert_eq!(
-            countdown_menu(Duration::days(3) + Duration::hours(4)),
-            "3天4小时后重置"
-        );
-    }
-
-    #[test]
     fn compact_format_boundaries() {
-        assert_eq!(countdown_compact(Duration::minutes(12)), "12分");
-        assert_eq!(countdown_compact(Duration::minutes(4 * 60 + 23)), "4:23");
+        assert_eq!(countdown_compact(Duration::minutes(12)), "12M");
+        assert_eq!(countdown_compact(Duration::minutes(60)), "1H");
+        assert_eq!(countdown_compact(Duration::minutes(4 * 60 + 23)), "4H23M");
+        assert_eq!(countdown_compact(Duration::hours(24)), "1D");
         assert_eq!(
             countdown_compact(Duration::days(3) + Duration::hours(4)),
-            "3d"
+            "3D4H"
         );
     }
 
@@ -927,38 +890,26 @@ mod countdown_tests {
     fn quota_countdown_prefers_reset_at_then_falls_back() {
         let now = Utc.with_ymd_and_hms(2026, 10, 31, 12, 0, 0).unwrap();
         // reset_at 精确换算
-        let a = q(Some("2026-10-31T13:24:00Z"), Some("1小时后重置"));
-        assert_eq!(
-            quota_countdown_menu(&a, now).as_deref(),
-            Some("1小时24分后重置")
-        );
-        assert_eq!(quota_countdown_compact(&a, now).as_deref(), Some("1:24"));
-        // 无 reset_at 回退本地化文本；compact 回退同文本
-        let b = q(None, Some("12分钟后重置"));
-        assert_eq!(
-            quota_countdown_menu(&b, now).as_deref(),
-            Some("12分钟后重置")
-        );
+        let a = q(Some("2026-10-31T13:24:00Z"), Some("1H24M"));
+        assert_eq!(quota_countdown_compact(&a, now).as_deref(), Some("1H24M"));
+        // 无 reset_at 回退 reset_time 文本（provider 层同输出紧凑格式）
+        let b = q(None, Some("12M"));
+        assert_eq!(quota_countdown_compact(&b, now).as_deref(), Some("12M"));
         // 均无
-        assert_eq!(quota_countdown_menu(&q(None, None), now), None);
+        assert_eq!(quota_countdown_compact(&q(None, None), now), None);
     }
 
     #[test]
     fn quota_countdown_expired_reset_at_omits_without_fallback() {
         let now = Utc.with_ymd_and_hms(2026, 10, 31, 12, 0, 0).unwrap();
         // reset_at 已过期：按 spec §5.4「已过期→省略」，不回退陈旧 reset_time 文本
-        let expired = q(Some("2026-10-31T11:00:00Z"), Some("12分钟后重置"));
-        assert_eq!(quota_countdown_menu(&expired, now), None);
+        let expired = q(Some("2026-10-31T11:00:00Z"), Some("12M"));
         assert_eq!(quota_countdown_compact(&expired, now), None);
         // reset_at 解析失败：回退 reset_time 文本（与缺失同路）
-        let unparseable = q(Some("garbage"), Some("12分钟后重置"));
-        assert_eq!(
-            quota_countdown_menu(&unparseable, now).as_deref(),
-            Some("12分钟后重置")
-        );
+        let unparseable = q(Some("garbage"), Some("12M"));
         assert_eq!(
             quota_countdown_compact(&unparseable, now).as_deref(),
-            Some("12分钟后重置")
+            Some("12M")
         );
     }
 }

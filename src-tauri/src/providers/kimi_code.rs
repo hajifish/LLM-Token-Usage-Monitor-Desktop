@@ -220,21 +220,16 @@ impl KimiCodeProvider {
     }
 }
 
-/// 将 ISO 8601 时间字符串转换为相对时间描述。
+/// 将 ISO 8601 时间字符串转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
 fn format_iso_reset(iso: &str) -> String {
     use chrono::{DateTime, Utc};
     match iso.parse::<DateTime<Utc>>() {
         Ok(dt) => {
-            let now = Utc::now();
-            let duration = dt.signed_duration_since(now);
-            if duration.num_days() > 0 {
-                format!("{}天后重置", duration.num_days())
-            } else if duration.num_hours() > 0 {
-                format!("{}小时后重置", duration.num_hours())
-            } else if duration.num_minutes() > 0 {
-                format!("{}分钟后重置", duration.num_minutes())
+            let duration = dt.signed_duration_since(Utc::now());
+            if duration > chrono::Duration::zero() {
+                crate::tray::countdown_compact(duration)
             } else {
-                "即将重置".to_string()
+                "0M".to_string()
             }
         }
         Err(_) => iso.to_string(),
@@ -371,7 +366,7 @@ mod tests {
         use chrono::Utc;
         let future = (Utc::now() + chrono::Duration::days(5)).to_rfc3339();
         let result = format_iso_reset(&future);
-        assert!(result.contains("天后重置"), "got: {}", result);
+        assert!(result.contains("D"), "got: {}", result);
     }
 
     #[test]
@@ -379,7 +374,7 @@ mod tests {
         use chrono::Utc;
         let future = (Utc::now() + chrono::Duration::minutes(45)).to_rfc3339();
         let result = format_iso_reset(&future);
-        assert!(result.contains("分钟后重置"), "got: {}", result);
+        assert!(result.contains("M"), "got: {}", result);
     }
 
     #[test]

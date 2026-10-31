@@ -152,7 +152,7 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
         if let Some(primary) = crate::tray::primary_quota(quotas) {
             return ProviderMenuBlock {
                 title: format!(
-                    "{} {} — 剩 {:.0}%{}",
+                    "{} {} — {:.0}%{}",
                     badge, p.alias, primary.remaining_percent, suffix
                 ),
                 details: quotas.iter().map(|q| quota_line(q, now)).collect(),
@@ -163,7 +163,7 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
     match &p.balance {
         Some(b) if b.is_percent() => ProviderMenuBlock {
             title: format!(
-                "{} {} — 剩 {:.0}%{}",
+                "{} {} — {:.0}%{}",
                 badge, p.alias, b.available_balance, suffix
             ),
             details: vec![],
@@ -1020,7 +1020,7 @@ mod tests {
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
         // 标题 = 身份徽章 + 别名 + 主窗口剩余；明细 = 全部窗口平铺（保持接口顺序）
-        assert_eq!(block.title, "🟠 Max工作 — 剩 62%");
+        assert_eq!(block.title, "🟠 Max工作 — 62%");
         assert_eq!(block.details.len(), 3);
         assert_eq!(block.details[0], "  [■■■■□□□□□□] 5H · 62% · 1H24M");
         assert!(block.details[1].starts_with("  [■"));
@@ -1040,7 +1040,7 @@ mod tests {
         };
         let p = status_full("Zhipu", "智谱", Some(b), None, None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🔵 智谱 — 剩 47%");
+        assert_eq!(block.title, "🔵 智谱 — 47%");
         assert!(block.details.is_empty());
     }
 
@@ -1073,7 +1073,7 @@ mod tests {
         ];
         let p = status_full("Zhipu", "智谱", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🔵 智谱 — 剩 35%");
+        assert_eq!(block.title, "🔵 智谱 — 35%");
         assert_eq!(block.details.len(), 2);
         assert_eq!(block.details[0], "  [■■■■■■■□□□] 5H · 35%");
         assert!(block.details[1].starts_with("  [■■■■■■■□□□] W"));
@@ -1132,7 +1132,7 @@ mod tests {
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         assert_eq!(
             provider_menu_block(&p, fixed_now()).title,
-            "🟠 Max工作 — 剩 3% ⚠️"
+            "🟠 Max工作 — 3% ⚠️"
         );
     }
 

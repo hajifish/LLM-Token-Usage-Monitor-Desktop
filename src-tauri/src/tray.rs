@@ -151,7 +151,9 @@ fn tray_value(p: &ProviderStatus) -> String {
     }
 }
 
-/// 解析 ISO/RFC3339 重置时刻为距 now 的剩余时长；解析失败或已到期返回 None
+/// 解析 ISO/RFC3339 重置时刻为距 now 的剩余时长；解析失败或已到期返回 None。
+/// （当前仅 quota_countdown_compact 内联同构逻辑，保留为语义文档与测试锚点）
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn reset_remaining(iso: &str, now: DateTime<Utc>) -> Option<chrono::Duration> {
     let dt = iso.parse::<DateTime<Utc>>().ok()?;
     let d = dt.signed_duration_since(now);
@@ -268,13 +270,12 @@ fn p_reset_ts(p: &ProviderStatus) -> i64 {
 }
 
 /// 构建状态栏常显文字（V2 全列表模式）：所有可见供应商逐项短码+主值，
-/// 紧张优先排序；告警项加 ⚠️ 前缀与紧凑倒计时，第一名（主力）恒带倒计时。
-/// 其余项仅 `短码 主值`。同短码多账号从第二个起追加序号（DS、DS2）。
+/// 紧张优先排序；告警项加 ⚠️ 前缀。仅展示进度值，不含重置倒计时
+/// （重置时刻只进下拉菜单明细行）。同短码多账号从第二个起追加序号（DS、DS2）。
 pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<String> {
     if !config.tray_text_enabled {
         return None;
     }
-    let now = Utc::now();
     let mut visible: Vec<&ProviderStatus> = summary
         .providers
         .iter()
@@ -303,8 +304,7 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
         std::collections::HashMap::new();
     let parts: Vec<String> = visible
         .iter()
-        .enumerate()
-        .map(|(i, p)| {
+        .map(|p| {
             let base = tray_short_code(&p.name)
                 .map(str::to_string)
                 .unwrap_or_else(|| fallback_short_name(&p.alias));
@@ -319,23 +319,12 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
                 Some(b) if b.is_percent() => format!("{:.0}%", aggregate_value(p)),
                 _ => tray_value(p),
             };
-            let alert = quota_warning_level(p) > 0;
-            // 主力（第一名）与告警项带倒计时，其余项保持紧凑
-            let cd = if i == 0 || alert {
-                p.quota_infos
-                    .as_ref()
-                    .and_then(|qs| primary_quota(qs))
-                    .and_then(|q| q.reset_at.as_deref())
-                    .and_then(|iso| reset_remaining(iso, now))
-                    .map(countdown_compact)
+            let prefix = if quota_warning_level(p) > 0 {
+                "⚠️ "
             } else {
-                None
+                ""
             };
-            let prefix = if alert { "⚠️ " } else { "" };
-            match cd {
-                Some(c) => format!("{prefix}{code} {value}·{c}"),
-                None => format!("{prefix}{code} {value}"),
-            }
+            format!("{prefix}{code} {value}")
         })
         .collect();
     Some(parts.join(" · "))
@@ -802,9 +791,9 @@ mod tray_title_tests {
     }
 
     #[test]
-    fn v2_alert_item_carries_compact_countdown() {
-        // Codex 5h 剩 3%（<5 触发黄档）→ ⚠️ 前缀 + 紧凑倒计时（值与倒计时以 · 相连）。
-        // reset_at 取远期（2999 年），倒计时段必为「Xd」且稳定存在，不受系统时钟影响
+    fn v2_alert_item_shows_prefix_without_countdown() {
+        // Codex 5h 剩 3%（<5 触发黄档）→ ⚠️ 前缀；状态条只展示进度值，
+        // 重置倒计时只进下拉菜单明细行，不进状态条
         let qs = vec![quota("5小时", 3.0, Some("2999-01-01T00:00:00Z"))];
         let mut p = status_q("Codex", Some(balance(3.0, "%")), Some(qs));
         p.name = "Codex".into();
@@ -813,7 +802,7 @@ mod tray_title_tests {
             ..Default::default()
         };
         let title = build_tray_title(&config(vec![]), &s).unwrap();
-        assert!(title.starts_with("⚠️ CX 3%·"), "got: {title}");
+        assert_eq!(title, "⚠️ CX 3%");
     }
 
     #[test]
@@ -873,9 +862,9 @@ mod tray_title_tests {
     }
 
     #[test]
-    fn v2_only_first_or_alert_carries_countdown() {
-        // 两个 percent 型同剩 35%、均非告警：并列取重置更近者居首（CX），
-        // 仅第一名带倒计时，第二名（Z）不带 —— 真机观察到第二名也带，本用例锁定规则
+    fn v2_no_item_carries_countdown_in_status_bar() {
+        // 状态条只展示进度：任何项（含第一名与并列者）都不带重置倒计时；
+        // 排序 tie-break（重置更近者居首）仍然生效
         let mut cx = status_q(
             "CX",
             Some(balance(35.0, "%")),
@@ -893,16 +882,11 @@ mod tray_title_tests {
             ..Default::default()
         };
         let title = build_tray_title(&config(vec![]), &s).unwrap();
-        // CX 重置更近（1 月）→ 居首带倒计时；Z（6 月）仅短码+主值
-        assert!(title.contains("CX 35%·"), "CX 应带倒计时, got: {title}");
-        assert!(
-            title.contains("Z 35%") && !title.contains("Z 35%·"),
-            "Z 不应带倒计时, got: {title}"
-        );
+        assert_eq!(title, "CX 35% · Z 35%");
     }
 
     #[test]
-    fn v3_api_only_falls_back_to_balance() {
+    fn v2_api_only_falls_back_to_balance() {
         let mut ds = status("工作号", Some(balance(88.0, "CNY")), None);
         ds.name = "DeepSeek".into();
         let s = UsageSummary {

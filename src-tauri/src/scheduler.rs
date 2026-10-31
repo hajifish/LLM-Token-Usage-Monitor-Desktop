@@ -20,39 +20,47 @@ fn progress_bar(percent: f64, width: usize) -> String {
     format!("[{}{}]", "■".repeat(filled), "□".repeat(empty))
 }
 
-/// 根据告警级别返回状态点 emoji
-fn status_dot(level: u8) -> &'static str {
-    match level {
-        2 => "🔴",
-        1 => "🟡",
-        _ => "🟢",
+/// 供应商身份徽章（彩色圆点，对应设计稿品牌色）。
+/// 原生菜单文本无法着色，彩色 emoji 是唯一的「供应商识别色」载体。
+fn identity_badge(name: &str) -> &'static str {
+    match name {
+        "Claude Code" => "🟠",
+        "Codex" => "🟣",
+        "Zhipu" => "🔵",
+        "Kimi Code" => "💗",
+        "Kimi API" => "💠",
+        "DeepSeek" => "🔷",
+        "OpenAI" => "🟢",
+        "Anthropic" => "🟤",
+        _ => "⚪",
     }
 }
 
-/// 一个供应商的托盘菜单块：标题行 + 明细行 + 折叠窗口行（非空时渲染「其余 N 个窗口」子菜单）
-pub(crate) struct ProviderMenuBlock {
-    pub title: String,
-    pub details: Vec<String>,
-    pub extra_windows: Vec<String>,
-}
-
-/// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
-const DETAIL_INDENT: &str = "  ";
-
-/// 菜单块状态点：与状态栏标题同源，percent 型按主窗口判级（quota_warning_level）；
-/// 数据获取失败（无 balance）显示黄点，与「无数据」的绿点区分
-/// （balance=None 时 quota_warning_level 回退 provider_warning_level 一律 0，
-/// 该规则同时被状态栏/图标告警消费，不宜为本处单独放宽）
-fn block_dot(p: &ProviderStatus) -> &'static str {
+/// 标题行告警后缀：与状态栏标题同源（percent 型按主窗口 quota_warning_level）；
+/// 数据获取失败（无 balance）同样 ⚠️。级别红/黄由 🚨/⚠️ 区分。
+fn alert_suffix(p: &ProviderStatus) -> &'static str {
     let level = if p.balance.is_none() && p.error.is_some() {
         1
     } else {
         crate::tray::quota_warning_level(p)
     };
-    status_dot(level)
+    match level {
+        2 => " 🚨",
+        1 => " ⚠️",
+        _ => "",
+    }
 }
 
-/// 单个 quota 窗口的菜单明细行：缩进 + 名称 + 进度条 + 剩余%，有倒计时时追加
+/// 一个供应商的托盘菜单块：标题行 + 明细行（全部配额窗口平铺，不折叠）
+pub(crate) struct ProviderMenuBlock {
+    pub title: String,
+    pub details: Vec<String>,
+}
+
+/// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
+const DETAIL_INDENT: &str = "  ";
+
+/// 单个 quota 窗口的菜单明细行：进度条前置（多窗口时条形纵向对齐）
 fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
     let used_pct = if q.total > 0.0 {
         q.used / q.total * 100.0
@@ -62,12 +70,12 @@ fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
     let bar = progress_bar(used_pct, 10);
     match crate::tray::quota_countdown_menu(q, now) {
         Some(cd) => format!(
-            "{DETAIL_INDENT}{} {} 剩 {:.0}% · {}",
-            q.name, bar, q.remaining_percent, cd
+            "{DETAIL_INDENT}{} {} · 剩 {:.0}% · {}",
+            bar, q.name, q.remaining_percent, cd
         ),
         None => format!(
-            "{DETAIL_INDENT}{} {} 剩 {:.0}%",
-            q.name, bar, q.remaining_percent
+            "{DETAIL_INDENT}{} {} · 剩 {:.0}%",
+            bar, q.name, q.remaining_percent
         ),
     }
 }
@@ -111,9 +119,10 @@ fn usage_line(u: &UsageData) -> Option<String> {
 }
 
 /// 供应商 → 菜单块。percent 型消费 quota_infos（标题主指标取主窗口 remaining_percent，
-/// 主窗口选择复用 tray::primary_quota 规则）；API 型标题为余额、有 usage 时加今日明细行
+/// 全部窗口平铺为明细行、保持接口返回顺序）；API 型标题为余额、有 usage 时加今日明细行
 fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBlock {
-    let dot = block_dot(p);
+    let badge = identity_badge(&p.name);
+    let suffix = alert_suffix(p);
     let percent_quota = p
         .balance
         .as_ref()
@@ -121,51 +130,46 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
         .and_then(|_| p.quota_infos.as_ref().filter(|qs| !qs.is_empty()));
 
     if let Some(quotas) = percent_quota {
-        // 复用 primary_quota 拿主窗口引用，再按指针恒等回索引，
-        // 并列比较逻辑（差<0.5 取重置更近）只在 tray 侧维护一份
         if let Some(primary) = crate::tray::primary_quota(quotas) {
-            let idx = quotas
-                .iter()
-                .position(|q| std::ptr::eq(q, primary))
-                .expect("primary 来自 quotas，指针恒等必命中");
             return ProviderMenuBlock {
-                title: format!("{} {} — 剩 {:.0}%", dot, p.alias, primary.remaining_percent),
-                details: vec![quota_line(primary, now)],
-                extra_windows: quotas
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != idx)
-                    .map(|(_, q)| quota_line(q, now))
-                    .collect(),
+                title: format!(
+                    "{} {} — 剩 {:.0}%{}",
+                    badge, p.alias, primary.remaining_percent, suffix
+                ),
+                details: quotas.iter().map(|q| quota_line(q, now)).collect(),
             };
         }
     }
 
     match &p.balance {
         Some(b) if b.is_percent() => ProviderMenuBlock {
-            title: format!("{} {} — 剩 {:.0}%", dot, p.alias, b.available_balance),
+            title: format!(
+                "{} {} — 剩 {:.0}%{}",
+                badge, p.alias, b.available_balance, suffix
+            ),
             details: vec![],
-            extra_windows: vec![],
         },
         Some(b) if b.is_usd() => ProviderMenuBlock {
-            title: format!("{} {} — ${:.2}", dot, p.alias, b.available_balance),
+            title: format!(
+                "{} {} — ${:.2}{}",
+                badge, p.alias, b.available_balance, suffix
+            ),
             details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
-            extra_windows: vec![],
         },
         Some(b) => ProviderMenuBlock {
-            title: format!("{} {} — ¥{:.2}", dot, p.alias, b.available_balance),
+            title: format!(
+                "{} {} — ¥{:.2}{}",
+                badge, p.alias, b.available_balance, suffix
+            ),
             details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
-            extra_windows: vec![],
         },
         None if p.error.is_some() => ProviderMenuBlock {
-            title: format!("{} {} — 获取失败", dot, p.alias),
+            title: format!("{} {} — 获取失败{}", badge, p.alias, suffix),
             details: vec![],
-            extra_windows: vec![],
         },
         None => ProviderMenuBlock {
-            title: format!("{} {} — 无数据", dot, p.alias),
+            title: format!("{} {} — 无数据{}", badge, p.alias, suffix),
             details: vec![],
-            extra_windows: vec![],
         },
     }
 }
@@ -273,11 +277,10 @@ pub struct TrayMenuState {
     inner: std::sync::Mutex<Option<TrayMenuHandles>>,
 }
 
-/// 单个供应商块的菜单条目句柄：标题行 + 明细行 + 折叠窗口子菜单（非空时存在）
+/// 单个供应商块的菜单条目句柄：标题行 + 明细行（全部窗口平铺）
 struct ProviderMenuHandles {
     title: MenuItem<Wry>,
     details: Vec<MenuItem<Wry>>,
-    extra: Option<(Submenu<Wry>, Vec<MenuItem<Wry>>)>,
 }
 
 #[derive(Default)]
@@ -545,14 +548,6 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                         for item in block.details.iter().skip(b.details.len()) {
                             let _ = item.set_text("");
                         }
-                        if let Some((_, extra_items)) = &block.extra {
-                            for (item, text) in extra_items.iter().zip(b.extra_windows.iter()) {
-                                let _ = item.set_text(text);
-                            }
-                            for item in extra_items.iter().skip(b.extra_windows.len()) {
-                                let _ = item.set_text("");
-                            }
-                        }
                     }
                     if let Some(time_item) = &handles.time_item {
                         let _ = time_item.set_text(format!("更新于 {}", update_time_text(summary)));
@@ -575,8 +570,9 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 否则会装上缺少"退出"的菜单（ActivationPolicy::Accessory 下托盘退出是唯一出口）。
         let mut critical_ok = true;
 
-        // 1) 供应商块（标题行 + 明细行 + 折叠窗口子菜单），块上限沿用 50；
-        //    id 加序号防别名重复冲突
+        // 1) 供应商块（标题行 + 明细行全平铺），块上限沿用 50；id 加序号防别名重复冲突。
+        //    展示行一律 enabled=true：原生菜单把 disabled 渲染成 50% 灰（用户反馈「字太淡」），
+        //    enabled 展示行点击无动作（id 无 on_menu_event 匹配），代价仅是点击后菜单收起。
         const MAX_PROVIDER_BLOCKS: usize = 50;
         let now = Utc::now();
         let mut provider_blocks = Vec::new();
@@ -591,7 +587,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 app_handle,
                 format!("p{i}_title"),
                 &block.title,
-                false,
+                true,
                 None::<&str>,
             ) else {
                 // title 创建失败跳过整块：provider_blocks 与 summary.providers 从此失去
@@ -605,39 +601,16 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let mut detail_items = Vec::new();
             for (j, text) in block.details.iter().enumerate() {
                 if let Ok(item) =
-                    MenuItem::with_id(app_handle, format!("p{i}_d{j}"), text, false, None::<&str>)
+                    MenuItem::with_id(app_handle, format!("p{i}_d{j}"), text, true, None::<&str>)
                 {
                     let _ = menu.append(&item);
                     detail_items.push(item);
                 }
             }
 
-            let mut extra_handle = None;
-            if !block.extra_windows.is_empty() {
-                let label = format!("其余 {} 个窗口", block.extra_windows.len());
-                if let Ok(sub) = Submenu::with_id(app_handle, format!("p{i}_extra"), &label, true) {
-                    let mut sub_items = Vec::new();
-                    for (j, text) in block.extra_windows.iter().enumerate() {
-                        if let Ok(item) = MenuItem::with_id(
-                            app_handle,
-                            format!("p{i}_e{j}"),
-                            text,
-                            false,
-                            None::<&str>,
-                        ) {
-                            let _ = sub.append(&item);
-                            sub_items.push(item);
-                        }
-                    }
-                    let _ = menu.append(&sub);
-                    extra_handle = Some((sub, sub_items));
-                }
-            }
-
             provider_blocks.push(ProviderMenuHandles {
                 title,
                 details: detail_items,
-                extra: extra_handle,
             });
         }
 
@@ -645,7 +618,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         if summary.providers.len() > MAX_PROVIDER_BLOCKS {
             let text = format!("…共 {} 个供应商", summary.providers.len());
             if let Ok(item) =
-                MenuItem::with_id(app_handle, "provider_overflow", &text, false, None::<&str>)
+                MenuItem::with_id(app_handle, "provider_overflow", &text, true, None::<&str>)
             {
                 let _ = menu.append(&item);
             }
@@ -654,7 +627,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         // 3) 没有任何服务商时放一个占位项
         if summary.providers.is_empty() {
             if let Ok(item) =
-                MenuItem::with_id(app_handle, "no_provider", "暂无服务商", false, None::<&str>)
+                MenuItem::with_id(app_handle, "no_provider", "暂无服务商", true, None::<&str>)
             {
                 let _ = menu.append(&item);
             }
@@ -666,7 +639,7 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             app_handle,
             "update-time",
             format!("更新于 {}", update_time_text(summary)),
-            false,
+            true,
             None::<&str>,
         ) {
             let _ = menu.append(&time_item);
@@ -972,23 +945,6 @@ mod tests {
         assert_eq!(progress_bar(-10.0, 10), "[□□□□□□□□□□]");
     }
 
-    // ---------- status_dot ----------
-
-    #[test]
-    fn status_dot_level_2_is_red() {
-        assert_eq!(status_dot(2), "🔴");
-    }
-
-    #[test]
-    fn status_dot_level_1_is_yellow() {
-        assert_eq!(status_dot(1), "🟡");
-    }
-
-    #[test]
-    fn status_dot_level_0_is_green() {
-        assert_eq!(status_dot(0), "🟢");
-    }
-
     // ---------- provider_menu_block ----------
 
     fn quota(name: &str, used: f64, reset_at: Option<&str>) -> crate::models::QuotaInfo {
@@ -1028,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn percent_multi_window_block_has_title_primary_and_extras() {
+    fn percent_multi_window_block_flattens_all_windows() {
         let b = crate::models::BalanceData {
             provider: "Claude Code".into(),
             available_balance: 62.0,
@@ -1044,14 +1000,16 @@ mod tests {
         ];
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🟢 Max工作 — 剩 62%");
-        assert_eq!(block.details.len(), 1);
+        // 标题 = 身份徽章 + 别名 + 主窗口剩余；明细 = 全部窗口平铺（保持接口顺序）
+        assert_eq!(block.title, "🟠 Max工作 — 剩 62%");
+        assert_eq!(block.details.len(), 3);
         assert_eq!(
             block.details[0],
-            "  5小时 [■■■■□□□□□□] 剩 62% · 1小时24分后重置"
+            "  [■■■■□□□□□□] 5小时 · 剩 62% · 1小时24分后重置"
         );
-        assert_eq!(block.extra_windows.len(), 2);
-        assert!(block.extra_windows[0].starts_with("  7天 [■"));
+        assert!(block.details[1].starts_with("  [■"));
+        assert!(block.details[1].contains("7天 · 剩 81%"));
+        assert!(block.details[2].contains("7天Opus · 剩 95%"));
     }
 
     #[test]
@@ -1066,8 +1024,8 @@ mod tests {
         };
         let p = status_full("Zhipu", "智谱", Some(b), None, None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🟢 智谱 — 剩 47%");
-        assert!(block.details.is_empty() && block.extra_windows.is_empty());
+        assert_eq!(block.title, "🔵 智谱 — 剩 47%");
+        assert!(block.details.is_empty());
     }
 
     #[test]
@@ -1090,7 +1048,7 @@ mod tests {
         };
         let p = status_full("DeepSeek", "DeepSeek", Some(b), None, Some(u));
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "🟢 DeepSeek — ¥88.88");
+        assert_eq!(block.title, "🔷 DeepSeek — ¥88.88");
         assert_eq!(block.details, vec!["  今日 42次 · 1.2M tok"]);
     }
 
@@ -1098,18 +1056,19 @@ mod tests {
     fn error_and_no_data_blocks() {
         let mut p = status_full("Kimi", "Kimi", None, None, None);
         p.error = Some("timeout".into());
+        // 获取失败：无 balance → 黄档语义保留为行尾 ⚠️；身份徽章未知类型为 ⚪
         assert_eq!(
             provider_menu_block(&p, fixed_now()).title,
-            "🟡 Kimi — 获取失败"
+            "⚪ Kimi — 获取失败 ⚠️"
         );
         let p2 = status_full("X", "X", None, None, None);
-        assert_eq!(provider_menu_block(&p2, fixed_now()).title, "🟢 X — 无数据");
+        assert_eq!(provider_menu_block(&p2, fixed_now()).title, "⚪ X — 无数据");
     }
 
     #[test]
-    fn block_dot_follows_primary_window_level() {
+    fn alert_suffix_follows_primary_window_level() {
         // balance 62% 平静，但主窗口（7天Opus 剩 3%，<5 黄档）才是显示值：
-        // 状态点须按主窗口判级为 🟡，不能再用 balance 判成 🟢（与 ⚠️ 同源）
+        // 告警后缀须按主窗口判级为 ⚠️，不能再用 balance 判成无告警（与 ⚠️ 同源）
         let b = crate::models::BalanceData {
             provider: "Claude Code".into(),
             available_balance: 62.0,
@@ -1122,7 +1081,7 @@ mod tests {
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         assert_eq!(
             provider_menu_block(&p, fixed_now()).title,
-            "🟡 Max工作 — 剩 3%"
+            "🟠 Max工作 — 剩 3% ⚠️"
         );
     }
 

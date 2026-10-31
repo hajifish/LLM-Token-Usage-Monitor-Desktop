@@ -89,11 +89,11 @@ fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
     let name = short_window(&q.name);
     match crate::tray::quota_countdown_compact(q, now) {
         Some(cd) => format!(
-            "{DETAIL_INDENT}{} {} · 剩 {:.0}% · {}",
+            "{DETAIL_INDENT}{} {} · {:.0}% · {}",
             bar, name, q.remaining_percent, cd
         ),
         None => format!(
-            "{DETAIL_INDENT}{} {} · 剩 {:.0}%",
+            "{DETAIL_INDENT}{} {} · {:.0}%",
             bar, name, q.remaining_percent
         ),
     }
@@ -387,7 +387,7 @@ async fn poll_providers(
             .alias
             .clone()
             .filter(|a| !a.trim().is_empty())
-            .unwrap_or_else(|| provider_cfg.name.clone());
+            .unwrap_or_else(|| providers::display_name(&provider_cfg.name).to_string());
 
         // Codex / Claude Code / Kimi Code 无需 API Key（凭证从 CLI 配置文件读取），跳过空 key 检查
         let needs_api_key = !matches!(
@@ -1022,10 +1022,10 @@ mod tests {
         // 标题 = 身份徽章 + 别名 + 主窗口剩余；明细 = 全部窗口平铺（保持接口顺序）
         assert_eq!(block.title, "🟠 Max工作 — 剩 62%");
         assert_eq!(block.details.len(), 3);
-        assert_eq!(block.details[0], "  [■■■■□□□□□□] 5H · 剩 62% · 1H24M");
+        assert_eq!(block.details[0], "  [■■■■□□□□□□] 5H · 62% · 1H24M");
         assert!(block.details[1].starts_with("  [■"));
-        assert!(block.details[1].contains("7D · 剩 81% · 3D12H"));
-        assert!(block.details[2].contains("7D Opus · 剩 95%"));
+        assert!(block.details[1].contains("7D · 81% · 3D12H"));
+        assert!(block.details[2].contains("7D Opus · 95%"));
     }
 
     #[test]
@@ -1075,7 +1075,7 @@ mod tests {
         let block = provider_menu_block(&p, fixed_now());
         assert_eq!(block.title, "🔵 智谱 — 剩 35%");
         assert_eq!(block.details.len(), 2);
-        assert_eq!(block.details[0], "  [■■■■■■■□□□] 5H · 剩 35%");
+        assert_eq!(block.details[0], "  [■■■■■■■□□□] 5H · 35%");
         assert!(block.details[1].starts_with("  [■■■■■■■□□□] W"));
     }
 

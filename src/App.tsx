@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
@@ -10,6 +11,11 @@ import { useUsage } from './hooks/useUsage';
 function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
   const { summary, loading, refreshing, error, refresh } = useUsage();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const unlisten = listen<string>('navigate', (event) => {
@@ -95,6 +101,7 @@ function App() {
         ) : (
           <Settings onBack={() => setView('usage')} />
         )}
+        {appVersion && <div className="version-tag">v{appVersion}</div>}
       </div>
     </ErrorBoundary>
   );

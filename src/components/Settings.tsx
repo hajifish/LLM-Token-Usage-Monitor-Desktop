@@ -2,8 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppConfig, ConfigHealth, ProviderConfig } from '../types';
-import { useUpdate } from '../hooks/useUpdate';
-import { UpdateActions, UpdateProgress } from './UpdateNotice';
 
 interface SettingsProps {
   onBack: () => void;
@@ -103,7 +101,6 @@ function Settings({ onBack }: SettingsProps) {
   const [message, setMessage] = useState('');
   /** 正在确认删除的供应商索引；null 表示未在确认中 */
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
-  const update = useUpdate();
 
   /** 刷新健康状态（保存后重新拉取，以便展示备份文件名）。 */
   const refreshHealth = () =>
@@ -441,67 +438,6 @@ function Settings({ onBack }: SettingsProps) {
           <button className="add-btn" onClick={addProvider}>
             + 添加服务商
           </button>
-        </div>
-
-        {/* 关于与更新 */}
-        <div className="settings-section">
-          <h3>关于与更新</h3>
-          <div className="update-card">
-            <div className="update-row">
-              <span className="update-row-label">当前版本</span>
-              <span className="update-row-value">v{update.status?.current_version ?? '—'}</span>
-            </div>
-            <div className="update-row">
-              <span className="update-row-label">自动检查更新</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={config.auto_check_update}
-                  onChange={(e) => setConfig({ ...config, auto_check_update: e.target.checked })}
-                />
-              </label>
-            </div>
-            <span className="update-hint">
-              启动 60 秒后首次检查，此后每小时一次；关闭后仍可手动检查。
-            </span>
-
-            {update.status?.phase === 'downloading' && <UpdateProgress status={update.status} />}
-
-            {update.status?.phase === 'available' && (
-              <div className="update-available">
-                <span className="update-row-label">
-                  新版本 v{update.status.version}
-                  {update.status.date && (
-                    <span className="update-date"> · {update.status.date}</span>
-                  )}
-                </span>
-                {update.status.notes && <pre className="update-notes">{update.status.notes}</pre>}
-              </div>
-            )}
-
-            {update.status?.phase === 'ready' && (
-              <span className="update-hint">
-                更新包已下载并通过签名校验。安装会替换当前应用并自动重启，配置与密钥保留在本机；
-                macOS 若提示输入密码，请输入登录密码以完成替换。
-              </span>
-            )}
-
-            <div className="update-actions">
-              {update.status && <UpdateActions status={update.status} api={update} />}
-            </div>
-
-            {update.status && (
-              <span className="update-hint update-status-line">
-                {[
-                  update.status.message,
-                  update.status.last_checked ? `最近检查 ${update.status.last_checked}` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-            )}
-            {update.error && <span className="update-error">{update.error}</span>}
-          </div>
         </div>
       </div>
     </div>

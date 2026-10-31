@@ -730,16 +730,6 @@ input:focus, select:focus {
 }
 
 /* Settings: 关于与更新卡片 */
-.update-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  border: 1px solid var(--system-separator);
-}
-
 /* ===== 状态栏显示设置 ===== */
 .tray-display-card {
   display: flex;
@@ -781,44 +771,6 @@ input:focus, select:focus {
   color: var(--system-secondary-label);
 }
 
-.update-row-value {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--system-label);
-  font-variant-numeric: tabular-nums;
-}
-
-.update-date {
-  color: var(--system-tertiary-label);
-}
-
-.update-available {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(10, 132, 255, 0.08);
-}
-
-.update-notes {
-  max-height: 120px;
-  overflow-y: auto;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--system-secondary-label);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.update-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .update-hint {
   display: block;
   font-size: 11px;
@@ -835,4 +787,17 @@ input:focus, select:focus {
   .app {
     max-width: 100%;
   }
+}
+
+/* ===== 右下角版本水印（主页/设置页常显） ===== */
+.version-tag {
+  position: fixed;
+  right: 10px;
+  bottom: 6px;
+  font-size: 10px;
+  color: var(--system-quaternary-label);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+  z-index: 10;
 }

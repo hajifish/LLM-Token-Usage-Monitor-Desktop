@@ -10,12 +10,14 @@ use tauri::{
 use tokio::sync::{Notify, RwLock};
 use tokio::time::Duration;
 
-/// 生成 Unicode 进度条，如 [████████░░]
+/// 生成 Unicode 进度条，如 [■■■■□□□□□□]（实心=已用，空心=未用）。
+/// 空位用 □ 而非 ░：░ 在亮色菜单上近乎隐形（低用量时整条进度条消失），
+/// □ 的描边在明暗两种外观下均可辨识，且与实心块等宽对齐。
 fn progress_bar(percent: f64, width: usize) -> String {
     let filled = (percent / 100.0 * width as f64).round() as usize;
     let filled = filled.min(width);
     let empty = width.saturating_sub(filled);
-    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+    format!("[{}{}]", "■".repeat(filled), "□".repeat(empty))
 }
 
 /// 根据告警级别返回状态点 emoji
@@ -60,11 +62,11 @@ fn quota_line(q: &QuotaInfo, now: DateTime<Utc>) -> String {
     let bar = progress_bar(used_pct, 10);
     match crate::tray::quota_countdown_menu(q, now) {
         Some(cd) => format!(
-            "{DETAIL_INDENT}{} {} 剩{:.0}% · {}",
+            "{DETAIL_INDENT}{} {} 剩 {:.0}% · {}",
             q.name, bar, q.remaining_percent, cd
         ),
         None => format!(
-            "{DETAIL_INDENT}{} {} 剩{:.0}%",
+            "{DETAIL_INDENT}{} {} 剩 {:.0}%",
             q.name, bar, q.remaining_percent
         ),
     }
@@ -947,27 +949,27 @@ mod tests {
 
     #[test]
     fn progress_bar_zero_percent() {
-        assert_eq!(progress_bar(0.0, 10), "[░░░░░░░░░░]");
+        assert_eq!(progress_bar(0.0, 10), "[□□□□□□□□□□]");
     }
 
     #[test]
     fn progress_bar_hundred_percent() {
-        assert_eq!(progress_bar(100.0, 10), "[██████████]");
+        assert_eq!(progress_bar(100.0, 10), "[■■■■■■■■■■]");
     }
 
     #[test]
     fn progress_bar_fifty_percent() {
-        assert_eq!(progress_bar(50.0, 10), "[█████░░░░░]");
+        assert_eq!(progress_bar(50.0, 10), "[■■■■■□□□□□]");
     }
 
     #[test]
     fn progress_bar_over_hundred_clamps_to_full() {
-        assert_eq!(progress_bar(150.0, 10), "[██████████]");
+        assert_eq!(progress_bar(150.0, 10), "[■■■■■■■■■■]");
     }
 
     #[test]
     fn progress_bar_negative_clamps_to_empty() {
-        assert_eq!(progress_bar(-10.0, 10), "[░░░░░░░░░░]");
+        assert_eq!(progress_bar(-10.0, 10), "[□□□□□□□□□□]");
     }
 
     // ---------- status_dot ----------
@@ -1046,10 +1048,10 @@ mod tests {
         assert_eq!(block.details.len(), 1);
         assert_eq!(
             block.details[0],
-            "  5小时 [████░░░░░░] 剩62% · 1小时24分后重置"
+            "  5小时 [■■■■□□□□□□] 剩 62% · 1小时24分后重置"
         );
         assert_eq!(block.extra_windows.len(), 2);
-        assert!(block.extra_windows[0].starts_with("  7天 [█"));
+        assert!(block.extra_windows[0].starts_with("  7天 [■"));
     }
 
     #[test]

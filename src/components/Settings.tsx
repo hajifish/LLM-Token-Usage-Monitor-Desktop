@@ -23,15 +23,6 @@ const PROVIDER_OPTIONS = [
 /** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
 const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code']);
 
-/** 刷新间隔预设选项：秒数 → 显示文案。 */
-const REFRESH_OPTIONS: { value: number; label: string }[] = [
-  { value: 30, label: '30秒' },
-  { value: 60, label: '1分钟' },
-  { value: 120, label: '2分钟' },
-  { value: 300, label: '5分钟' },
-  { value: 600, label: '10分钟' },
-];
-
 /** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
 const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';
 
@@ -278,27 +269,6 @@ function Settings({ onBack }: SettingsProps) {
             </button>
           </div>
         )}
-
-        {/* 全局设置 */}
-        <div className="settings-section">
-          <div className="global-settings-row">
-            <img src="/logo-hd.png" alt="Logo" className="global-logo" />
-            <div className="refresh-picker">
-              <span className="refresh-label">刷新间隔</span>
-              <div className="refresh-options">
-                {REFRESH_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className={`refresh-chip ${config.refresh_interval === opt.value ? 'active' : ''}`}
-                    onClick={() => setConfig({ ...config, refresh_interval: opt.value })}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* 状态栏显示 */}
         <div className="settings-section">

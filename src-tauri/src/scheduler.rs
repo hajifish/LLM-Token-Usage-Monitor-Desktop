@@ -86,17 +86,20 @@ fn update_time_text(summary: &UsageSummary) -> String {
         .unwrap_or_else(|| summary.last_updated.clone())
 }
 
-/// 托盘「刷新间隔」预设档（与设置页 REFRESH_OPTIONS 保持一致）。
-const REFRESH_INTERVAL_OPTIONS: &[u64] = &[30, 60, 120, 300, 600];
+/// 托盘「刷新间隔」预设档（最短 1 分钟，避免请求过频）。
+const REFRESH_INTERVAL_OPTIONS: &[u64] = &[60, 120, 180, 300, 600, 1800, 3600, 21600];
 
 /// 刷新间隔档位的菜单文案。
 fn interval_label(secs: u64) -> String {
     match secs {
-        30 => "30 秒".to_string(),
         60 => "1 分钟".to_string(),
         120 => "2 分钟".to_string(),
+        180 => "3 分钟".to_string(),
         300 => "5 分钟".to_string(),
         600 => "10 分钟".to_string(),
+        1800 => "30 分钟".to_string(),
+        3600 => "1 小时".to_string(),
+        21600 => "6 小时".to_string(),
         other => format!("{} 秒", other),
     }
 }
@@ -296,11 +299,8 @@ async fn poll_providers(
         *s = summary.clone();
     }
 
-    // 更新托盘菜单和 tooltip
+    // 更新托盘菜单、tooltip、图标/文字展示与告警打点
     update_tray_menu(app_handle, &summary).await;
-
-    // 更新托盘图标警告打点（余量不足时显示红/黄点）
-    crate::tray::update_tray_badge(app_handle, &summary);
 
     // 推送给前端
     let _ = app_handle.emit("usage-updated", &summary);
@@ -313,9 +313,18 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             Some(state) => state.read().await.clone(),
             None => AppConfig::default(),
         };
+        // 有供应商上状态栏时：只显示文字、隐藏软件 logo；没有任何供应商展示时：
+        // 只显示软件 logo（带告警打点）、不显示文字，避免菜单栏重复占用
         let title = crate::tray::build_tray_title(&tray_config, summary);
-        if let Err(e) = tray.set_title(title.as_deref()) {
-            log::warn!("Failed to update tray title: {}", e);
+        match title.as_deref() {
+            Some(t) => {
+                let _ = tray.set_title(Some(t));
+                let _ = tray.set_icon(None);
+            }
+            None => {
+                let _ = tray.set_title(None::<&str>);
+                crate::tray::update_tray_badge(app_handle, summary);
+            }
         }
 
         // --- 构建 tooltip（鼠标悬停提示） ---
@@ -485,18 +494,11 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             critical_ok &= menu.append(&update_item).is_ok();
         }
 
-        // 6) 分隔线 → 设置 + 退出（同一分隔区）
+        // 6) 分隔线 → 退出（主窗口头部已有设置入口，托盘不再重复）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;
         };
         critical_ok &= menu.append(&separator2).is_ok();
-
-        let Ok(settings_item) =
-            MenuItem::with_id(app_handle, "settings", "⚙ 设置", true, None::<&str>)
-        else {
-            return;
-        };
-        critical_ok &= menu.append(&settings_item).is_ok();
 
         let Ok(quit_item) =
             MenuItem::with_id(app_handle, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)

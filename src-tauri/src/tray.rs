@@ -4,7 +4,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, Wry,
+    AppHandle, Manager, Wry,
 };
 
 /// 托盘中「检查更新」条目的当前句柄。
@@ -242,18 +242,11 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
     let update_item = create_update_item(app, "检查更新")?;
-    let settings_item = MenuItem::with_id(app, "settings", "⚙ 设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[
-            &open_item,
-            &separator1,
-            &update_item,
-            &settings_item,
-            &quit_item,
-        ],
+        &[&open_item, &separator1, &update_item, &quit_item],
     )?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
@@ -302,13 +295,6 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "quit" => app.exit(0),
             "check-update" => crate::updater::on_tray_click(app),
-            "settings" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = window.emit("navigate", "settings");
-                }
-            }
             id if id.starts_with("interval_") => {
                 // 托盘「刷新间隔」预设档直选：持久化并唤醒调度器立即生效
                 if let Ok(secs) = id.trim_start_matches("interval_").parse::<u64>() {

@@ -515,65 +515,6 @@
   font-weight: 600;
 }
 
-/* Compact global settings row */
-.global-settings-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  border: 1px solid var(--system-separator);
-}
-
-.global-logo {
-  width: 36px;
-  height: 36px;
-  object-fit: contain;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.refresh-picker {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-}
-
-.refresh-label {
-  font-size: 12px;
-  color: var(--system-secondary-label);
-  white-space: nowrap;
-}
-
-.refresh-options {
-  display: flex;
-  gap: 4px;
-}
-
-.refresh-chip {
-  border: 1px solid var(--system-separator);
-  background: transparent;
-  color: var(--system-secondary-label);
-  padding: 3px 10px;
-  border-radius: 14px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.refresh-chip:hover {
-  border-color: var(--system-blue);
-  color: var(--system-blue);
-}
-.refresh-chip.active {
-  background: var(--system-blue);
-  border-color: var(--system-blue);
-  color: #fff;
-}
-
 input[type="number"], input[type="password"], input[type="text"], select {
   padding: 6px 10px;
   border: 1px solid var(--system-separator);

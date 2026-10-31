@@ -404,15 +404,12 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(handles) = inner.as_mut() {
                 if handles.signature == signature {
-                    for (item, p) in handles
-                        .provider_items
-                        .iter()
-                        .zip(summary.providers.iter())
-                    {
+                    for (item, p) in handles.provider_items.iter().zip(summary.providers.iter()) {
                         let _ = item.set_text(&format_provider_line(p));
                     }
                     if let Some(time_item) = &handles.time_item {
-                        let _ = time_item.set_text(&format!("更新于 {}", update_time_text(summary)));
+                        let _ =
+                            time_item.set_text(&format!("更新于 {}", update_time_text(summary)));
                     }
                     // 同步刷新间隔勾选标记（配置可能在设置页被改动）
                     for (secs, item) in &handles.interval_items {
@@ -607,7 +604,11 @@ mod tests {
             providers: vec![status_with("DeepSeek", "私人号")],
             ..Default::default()
         };
-        assert_ne!(provider_signature(&a), provider_signature(&b), "同名不同别名应视为不同签名");
+        assert_ne!(
+            provider_signature(&a),
+            provider_signature(&b),
+            "同名不同别名应视为不同签名"
+        );
     }
 
     #[test]

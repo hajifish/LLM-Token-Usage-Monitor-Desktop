@@ -184,8 +184,7 @@ pub fn build_tray_title(config: &AppConfig, summary: &UsageSummary) -> Option<St
             format!("{} {}", code, tray_value(p))
         })
         .collect();
-    Some(parts.join(" · "))
-        .map(|title| {
+    Some(parts.join(" · ")).map(|title| {
         // 文字模式下图标被隐藏（set_icon(None)），红/黄告警打点不可见；
         // 余量告警触发时在标题前统一加 ⚠️ 前缀（红黄不再区分），避免告警能力回归为死代码
         if worst_warning(summary) > 0 {
@@ -253,10 +252,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let update_item = create_update_item(app, "检查更新")?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(
-        app,
-        &[&open_item, &separator1, &update_item, &quit_item],
-    )?;
+    let menu = Menu::with_items(app, &[&open_item, &separator1, &update_item, &quit_item])?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
     let icon_path = app
@@ -523,17 +519,18 @@ mod tray_title_tests {
             providers: vec![status("Claude Code", Some(balance(70.0, "%")), None)],
             ..Default::default()
         };
-        assert_eq!(
-            build_tray_title(&config(vec![]), &s).unwrap(),
-            "CC 70%"
-        );
+        assert_eq!(build_tray_title(&config(vec![]), &s).unwrap(), "CC 70%");
     }
 
     #[test]
     fn fallback_long_unknown_name_truncated() {
         // 未收录类型回退到别名截断：超 8 字符截前 7 字符 + …
         let s = UsageSummary {
-            providers: vec![status("SomeUnknownProvider", Some(balance(70.0, "%")), None)],
+            providers: vec![status(
+                "SomeUnknownProvider",
+                Some(balance(70.0, "%")),
+                None,
+            )],
             ..Default::default()
         };
         assert_eq!(

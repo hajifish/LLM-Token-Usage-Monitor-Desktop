@@ -66,6 +66,8 @@ export interface AppConfig {
   auto_check_update: boolean;
   /** 托盘文字总开关：关闭后菜单栏仅显示图标。 */
   tray_text_enabled: boolean;
+  /** 低余额主动系统通知：告警等级恶化时弹系统通知。 */
+  notifications_enabled: boolean;
 }
 
 /** 应用内更新的阶段 —— 与 Rust `updater::UpdatePhase` 严格一致（snake_case）。 */

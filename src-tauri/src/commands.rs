@@ -38,6 +38,15 @@ pub async fn trigger_refresh(notify: tauri::State<'_, Arc<Notify>>) -> Result<()
     Ok(())
 }
 
+/// 发送一条固定文案的测试通知，用于设置页「发送测试通知」按钮。
+/// 桌面端无法检测投递失败/权限拒绝（见 notification::send 的失败语义），
+/// 由用户自证通知链路是否畅通。
+#[tauri::command]
+pub async fn send_test_notification(app: AppHandle) -> Result<(), String> {
+    crate::notification::send_test_notification(&app);
+    Ok(())
+}
+
 /// 统一的配置落盘入口：备份守卫 → 加密原子写入 → 写回内存态。
 ///
 /// `save_config` 与其他直改配置的路径共用，避免写入保护逻辑分叉。
@@ -47,6 +56,10 @@ pub(crate) async fn persist_config(
     health_state: &Arc<RwLock<ConfigHealth>>,
     new_config: AppConfig,
 ) -> Result<(), String> {
+    // 身份键唯一是托盘开关（tray::provider_show_in_tray）与低余额通知定位的前提：
+    // 撞键时只有首个账号生效，其余静默失效，故在落盘咽喉拒绝（含遗留退化配置，
+    // 拒绝文案指引用户补别名）。见 models::provider_identity 的口径说明。
+    crate::models::validate_provider_identities(&new_config)?;
     // 读取本次会话的加载健康状态：unreadable 为真时，config::save 会在覆盖前先备份原密文，
     // 避免用户随手一次保存就永久销毁本机无法解密的全部密钥。
     // 已备份过（backup_path 非空）则不再重复备份：此时磁盘上已是本次会话新写入的可读信封，

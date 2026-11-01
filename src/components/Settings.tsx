@@ -18,10 +18,20 @@ const PROVIDER_OPTIONS = [
   { value: 'Kimi API', label: 'Kimi API' },
   { value: 'Kimi Code', label: 'Kimi Code' },
   { value: 'Zhipu', label: '智谱' },
+  { value: 'Qoder', label: 'Qoder' },
 ];
 
-/** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
-const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code']);
+/** 无需用户配置 API Key，凭证从本机 CLI / 桌面客户端自动读取的供应商类型。
+ *  与 Rust needs_api_key 名单同口径；Qoder 虽属免密默认，但其 PAT 兜底入口
+ *  在下方渲染分支特例放行（所有平台可填、可清空）。 */
+const KEYLESS_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
+
+/**
+ * 是否 macOS。Qoder 的本地凭据读取（客户端 auth.v1.dat + 钥匙串解密）仅 macOS 支持，
+ * 其他平台该路径必然失败，需回退为 PAT 输入（#88）。用 navigator.platform / userAgent
+ * 做最小侵入探测，不引入 Tauri 插件。
+ */
+const IS_MAC = /Mac/i.test(navigator.platform || '') || /Mac OS X/i.test(navigator.userAgent);
 
 /** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
 const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';
@@ -140,7 +150,10 @@ function Settings({ onBack }: SettingsProps) {
    *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
    *  在途期间 checkbox 置 disabled（可见、可预期），不静默丢弃点击。 */
   const [trayBusy, setTrayBusy] = useState(false);
-  /** 与后端 provider_show_in_tray 同语义的匹配键：name + trim 后 alias（空回退 name）。 */
+  /** 本页的配置行定位键：name + trim 后 alias（空回退 name）。
+   *  与后端 provider_show_in_tray 的匹配键并非同口径：后端空回退 display_name
+   *  （如 Zhipu→智谱），本键空回退 name——两套键空间互不相交，本键仅用于在
+   *  fresh.providers 中唯一定位配置行，不与后端互比。 */
   const providerKey = (p: ProviderConfig) => {
     const a = (p.alias || '').trim();
     return `${p.name}|${a === '' ? p.name : a}`;
@@ -165,7 +178,14 @@ function Settings({ onBack }: SettingsProps) {
         const key = providerKey(local);
         const targets = fresh.providers.filter((fp) => providerKey(fp) === key);
         if (targets.length !== 1) {
-          setMessage('配置已变化，请重新打开设置页');
+          // 先排查本页配置自身的身份键撞车（同类型无别名双账号）：这类配置后端落盘
+          // 同样会拒绝（models::validate_provider_identities），提示补别名而非误报「配置已变化」
+          const localCount = config.providers.filter((fp) => providerKey(fp) === key).length;
+          setMessage(
+            localCount > 1
+              ? '同类型账号需填写不同别名后才能单独控制显示'
+              : '配置已变化，请重新打开设置页',
+          );
           return;
         }
         targets[0].show_in_tray = patch.value;
@@ -190,6 +210,43 @@ function Settings({ onBack }: SettingsProps) {
       setConfig((c) => (c ? { ...c } : c));
     } finally {
       setTrayBusy(false);
+    }
+  };
+
+  /** 低余额通知开关即时生效：读最新配置 → 仅改本字段 → 落盘。
+   *  与 applyTrayDisplay 同模式：不经「保存」按钮，后端写入成功才同步本地状态。 */
+  const [notifBusy, setNotifBusy] = useState(false);
+  const applyNotificationEnabled = async (value: boolean) => {
+    setNotifBusy(true);
+    try {
+      const fresh = await invoke<AppConfig>('get_config');
+      fresh.notifications_enabled = value;
+      await invoke('save_config', { newConfig: fresh });
+      setConfig((cur) => (cur ? { ...cur, notifications_enabled: value } : cur));
+    } catch (e) {
+      // 失败不静默：走 toast 通道。受控 checkbox 回弹的主因是 React 18 受控组件
+      // restore 机制——react-dom 在 change 事件收尾无条件把 DOM checked 写回已提交
+      // state 值（已核 react-dom 18.3 源码验证回弹 100% 成立），本地状态未翻转即回弹；
+      // catch 里的 setConfig((c) => ({ ...c })) 只是冗余防御（触发一次重渲染兜底），勿误删或误信它是关键
+      setMessage(`通知设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
+    } finally {
+      setNotifBusy(false);
+    }
+  };
+
+  /** 发送测试通知：桌面端 API 无法检测投递失败与权限拒绝（后端无条件返回成功），
+   *  链路是否真正打通只能由用户亲眼看一次通知来确认。 */
+  const [testNotifyBusy, setTestNotifyBusy] = useState(false);
+  const sendTestNotification = async () => {
+    setTestNotifyBusy(true);
+    try {
+      await invoke('send_test_notification');
+    } catch (e) {
+      // 失败不静默：走与 handleSave 同一 toast 通道
+      setMessage(`测试通知发送失败: ${e}`);
+    } finally {
+      setTestNotifyBusy(false);
     }
   };
 
@@ -389,6 +446,38 @@ function Settings({ onBack }: SettingsProps) {
           </div>
         </div>
 
+        {/* 低余额通知 */}
+        <div className="settings-section">
+          <h3>低余额通知</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">余额/配额告警恶化时弹系统通知</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.notifications_enabled}
+                  disabled={notifBusy}
+                  onChange={(e) => applyNotificationEnabled(e.target.checked)}
+                />
+              </label>
+            </div>
+            <div className="update-row">
+              <span className="update-row-label">验证通知链路是否打通</span>
+              <button
+                className="cancel-btn"
+                onClick={sendTestNotification}
+                disabled={testNotifyBusy}
+              >
+                {testNotifyBusy ? '发送中...' : '发送测试通知'}
+              </button>
+            </div>
+            <span className="update-hint">
+              开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
+              能否收到取决于系统通知权限（设置 → 通知），建议用测试通知自证。
+            </span>
+          </div>
+        </div>
+
         {/* 服务商配置 */}
         <div className="settings-section">
           <h3>服务商</h3>
@@ -438,7 +527,28 @@ function Settings({ onBack }: SettingsProps) {
                   value={p.alias || ''}
                   onChange={(e) => updateProvider(i, 'alias', e.target.value)}
                 />
-                {CLI_OAUTH_PROVIDERS.has(p.name) ? (
+                {p.name === 'Qoder' ? (
+                  // Qoder 双认证路径（qoder.rs）：api_key 留空 = 本机客户端凭据（主路径），
+                  // 填写 PAT = 令牌兜底。所有平台都放行 PAT 输入：macOS 上客户端未登录或
+                  // 钥匙串授权被拒时兜底仍可用，已存的失效 PAT 也能在此清空并保存恢复主路径
+                  <>
+                    <input
+                      type="password"
+                      placeholder={
+                        IS_MAC
+                          ? 'PAT 个人访问令牌（可选，留空自动读取客户端凭据）'
+                          : 'PAT 个人访问令牌'
+                      }
+                      value={p.api_key}
+                      onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
+                    />
+                    <span className="ds-hint">
+                      {IS_MAC
+                        ? '留空自动读取本机 Qoder / Qoder CN 客户端登录凭据（需已登录，首次弹窗请点允许）；读取失败可改填 PAT，清空并保存即恢复自动读取'
+                        : '本地凭据读取暂仅支持 macOS，请填写 PAT 作为凭据来源'}
+                    </span>
+                  </>
+                ) : KEYLESS_PROVIDERS.has(p.name) ? (
                   <span className="ds-hint">
                     {p.name === 'Codex'
                       ? '自动从 ~/.codex/auth.json 读取凭证'

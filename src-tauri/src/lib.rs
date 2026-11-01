@@ -1,6 +1,9 @@
 mod commands;
 mod config;
+#[cfg(target_os = "macos")]
+mod menu_align;
 mod models;
+mod notification;
 mod providers;
 mod scheduler;
 mod secrets;
@@ -11,7 +14,9 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
-use commands::{get_config, get_config_health, get_usage, save_config, trigger_refresh};
+use commands::{
+    get_config, get_config_health, get_usage, save_config, send_test_notification, trigger_refresh,
+};
 use models::UsageSummary;
 use scheduler::Scheduler;
 use tauri_plugin_log::{Target, TargetKind};
@@ -40,6 +45,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        // 低余额主动系统通知：Rust 侧直接发送（不依赖 webview 打开）
+        .plugin(tauri_plugin_notification::init())
         // 应用内自动更新：端点与公钥在 tauri.conf.json 的 plugins.updater 中配置
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
@@ -79,6 +86,7 @@ pub fn run() {
             get_config,
             get_config_health,
             save_config,
+            send_test_notification,
             trigger_refresh,
             updater::get_update_status,
             updater::check_update,

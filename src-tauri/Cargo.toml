@@ -22,9 +22,12 @@ tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-ap
 tauri-plugin-autostart = "2"
 # 应用内自动更新：检查 GitHub Releases 静态清单 latest.json，minisign 签名校验后原地安装
 tauri-plugin-updater = "2"
+# 低余额主动系统通知：从 Rust 侧直接发送（不依赖 webview 打开）
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time", "sync", "macros"] }
+# rt：spawn_blocking——Qoder 钥匙串链路（可阻塞 60s 的授权弹窗）必须脱离 async worker
+tokio = { version = "1", features = ["time", "sync", "macros", "rt"] }
 reqwest = { version = "0.12", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
@@ -42,10 +45,35 @@ tray-icon = "0.24"
 zeroize = "1"
 # 用户主目录解析（Codex/Claude Code CLI 凭证路径）
 dirs = "7"
+# Qoder 客户端本地凭据解密：auth.v1.dat = "v10" + AES-128-CBC（IV=16 空格），
+# 密钥 = PBKDF2-SHA1(钥匙串 "<App> Safe Storage", "saltysalt", 1003 轮)（均纯 Rust 实现）
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = "0.12"
+hmac = "0.12"
+sha1 = "0.10"
 
 # Windows 机器指纹来源：注册表 MachineGuid
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.56"
+
+# 托盘菜单文本测量：muda 未暴露 NSMenuItem 原生句柄，无法设置 attributedTitle/右制表位，
+# 只能用菜单字体量宽度后以空格把「值」补到统一右边界（见 menu_align.rs）
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSFont",
+    "NSStringDrawing",
+    "NSAttributedString",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSDictionary",
+    "NSAttributedString",
+] }
 
 [profile.release]
 lto = true

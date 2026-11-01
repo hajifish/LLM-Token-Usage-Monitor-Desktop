@@ -10,6 +10,7 @@ const BRAND_LOGOS: Record<string, string> = {
   Codex: '/providers/openai.png',
   'Claude Code': '/providers/anthropic.png',
   'Kimi Code': '/providers/kimi.png',
+  Qoder: '/providers/qoder.png',
 };
 
 function BrandLogo({ name }: { name: string }) {
@@ -52,15 +53,33 @@ function warningLevel(p: ProviderStatus): number {
   return v < 10 ? 1 : 0;
 }
 
-function ProviderCard({ p }: { p: ProviderStatus }) {
-  if (!p.enabled) {
-    return (
-      <div className="p-card p-card-disabled">
-        <CardHead name={p.name} alias={p.alias} badge={{ text: '已禁用', cls: 'gray' }} />
+function QuotaRow({ q }: { q: QuotaInfo }) {
+  const pct = Math.max(0, Math.min(100, q.remaining_percent));
+  const meterClass = pct <= 0 ? 'meter-red' : pct <= 20 ? 'meter-orange' : 'meter-green';
+  return (
+    <div className="quota-row">
+      <div className="quota-row-top">
+        <span className="detail-key quota-name">
+          {q.plan_label && <span className="quota-plan-tag">{q.plan_label}</span>}
+          {q.name}
+        </span>
+        <span className="quota-pct">{pct.toFixed(0)}%</span>
       </div>
-    );
-  }
+      <div className="quota-row-bottom">
+        <span className={`quota-meter ${meterClass}`}>
+          <span className="quota-meter-fill" style={{ width: `${pct}%` }} />
+        </span>
+        {q.reset_time && (
+          <span className="reset-hint" title={q.reset_time}>
+            {q.reset_time}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
+function ProviderCard({ p }: { p: ProviderStatus }) {
   if (p.error) {
     return (
       <div className="p-card p-card-error">
@@ -73,9 +92,6 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
   const { balance, usage, quota_infos } = p;
   const isPercent = balance?.currency === '%';
   const isUsd = balance?.currency === 'USD';
-  // For percent-based providers (e.g. Zhipu), prefix the label with the primary quota name
-  const primaryQuotaName =
-    isPercent && quota_infos && quota_infos.length > 0 ? quota_infos[0].name : null;
   const warn = warningLevel(p);
   const warnClass = warn === 2 ? 'p-card-warn-red' : warn === 1 ? 'p-card-warn-yellow' : '';
 
@@ -84,7 +100,7 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
       {/* Card header with brand logo */}
       <CardHead name={p.name} alias={p.alias} />
 
-      {/* Main display: big number */}
+      {/* Main number: left-aligned, label on the same line */}
       {balance && (
         <div className="p-card-main">
           <span className={`p-card-big ${isUsd ? 'accent-blue' : 'accent-green'}`}>
@@ -95,31 +111,20 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
                 : `¥${balance.available_balance.toFixed(2)}`}
           </span>
           <span className="p-card-label">
-            {isPercent
-              ? `${primaryQuotaName ? primaryQuotaName + ' ' : ''}配额剩余`
-              : isUsd
-                ? '本月已花费'
-                : '剩余余额'}
+            {isPercent ? '配额剩余' : isUsd ? '本月已花费' : '剩余余额'}
           </span>
+        </div>
+      )}
+
+      {/* Balance breakdown: single compact line */}
+      {balance && !isPercent && !isUsd && (
+        <div className="p-card-balance-split">
+          赠 ¥{balance.voucher_balance.toFixed(2)} · 现 ¥{balance.cash_balance.toFixed(2)}
         </div>
       )}
 
       {/* Details section */}
       <div className="p-card-details">
-        {/* Balance breakdown */}
-        {balance && !isPercent && !isUsd && (
-          <div className="p-card-detail-row">
-            <span className="detail-key">赠金</span>
-            <span className="detail-val">¥{balance.voucher_balance.toFixed(2)}</span>
-          </div>
-        )}
-        {balance && !isPercent && !isUsd && (
-          <div className="p-card-detail-row">
-            <span className="detail-key">现金</span>
-            <span className="detail-val">¥{balance.cash_balance.toFixed(2)}</span>
-          </div>
-        )}
-
         {/* Today usage */}
         {usage && usage.total_tokens > 0 && (
           <>
@@ -136,20 +141,16 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
           </>
         )}
 
-        {/* Quota infos */}
+        {/* Quota infos: name + percent, then mini meter + reset time */}
         {quota_infos &&
-          quota_infos.map((q: QuotaInfo) => (
-            <div className="p-card-detail-row" key={q.name}>
-              <span className="detail-key">
-                {q.plan_label && <span className="quota-plan-tag">{q.plan_label}</span>}
-                {q.name}
-              </span>
-              <span className="detail-val">
-                {q.remaining_percent.toFixed(0)}%
-                {q.reset_time && <span className="reset-hint">{q.reset_time}</span>}
-              </span>
-            </div>
+          quota_infos.map((q: QuotaInfo, index: number) => (
+            <QuotaRow key={`${q.plan_label ?? ''}-${q.name}-${index}`} q={q} />
           ))}
+
+        {/* Nothing to show (e.g. API key accepted but no data yet) */}
+        {!balance && !(usage && usage.total_tokens > 0) && !quota_infos?.length && (
+          <p className="p-card-empty-hint">暂无数据</p>
+        )}
       </div>
     </div>
   );
@@ -186,7 +187,11 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
     );
   }
 
+  // Disabled providers are managed in Settings; keep the main view focused on active ones.
+  const visibleProviders = summary ? summary.providers.filter((p) => p.enabled) : [];
+
   if (!summary || summary.providers.length === 0) {
+    // 真正零配置才显示添加指引
     return (
       <div className="usage-panel empty">
         <div className="empty-icon">+</div>
@@ -196,11 +201,23 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
     );
   }
 
+  if (visibleProviders.length === 0) {
+    // 有配置但全部禁用：不能误导为「未配置」
+    return (
+      <div className="usage-panel empty">
+        <div className="empty-icon">–</div>
+        <p className="empty-title">所有供应商已禁用</p>
+        <p className="empty-hint">可在设置中启用</p>
+      </div>
+    );
+  }
+
   return (
     <div className={`usage-panel${refreshing ? ' is-refreshing' : ''}`}>
       <div className="card-grid">
-        {summary.providers.map((p) => (
-          <ProviderCard key={`${p.name}-${p.alias}`} p={p} />
+        {visibleProviders.map((p, i) => (
+          // alias 无自定义时回退显示名，同类型无别名双账号会重键；追加下标兜底
+          <ProviderCard key={`${p.name}-${p.alias}-${i}`} p={p} />
         ))}
       </div>
     </div>

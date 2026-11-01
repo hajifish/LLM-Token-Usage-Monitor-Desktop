@@ -127,6 +127,7 @@ fn tray_short_code(name: &str) -> Option<&'static str> {
         "Codex" => Some("CX"),
         "Anthropic" => Some("A"),
         "Claude Code" => Some("CC"),
+        "Qoder" => Some("QD"),
         _ => None,
     }
 }
@@ -142,7 +143,8 @@ fn fallback_short_name(alias: &str) -> String {
 }
 
 /// 状态栏片段的指标值部分；无数据/出错显示「–」
-fn tray_value(p: &ProviderStatus) -> String {
+/// （同时供 notification.rs 的进度文案复用，保持通知与状态条同源）
+pub(crate) fn tray_value(p: &ProviderStatus) -> String {
     match &p.balance {
         Some(b) if b.is_percent() => format!("{:.0}%", b.available_balance),
         Some(b) if b.is_usd() => format!("${:.2}", b.available_balance),
@@ -244,7 +246,8 @@ fn provider_show_in_tray(config: &AppConfig, p: &ProviderStatus) -> bool {
 
 /// V3 聚合主值：percent 型取主窗口剩余%（无 quota 回退 balance）；API 型取余额；
 /// 无数据返回 f64::MAX（排序垫底）
-fn aggregate_value(p: &ProviderStatus) -> f64 {
+/// （同时供 notification.rs 的进度文案复用，保持通知与状态条同源）
+pub(crate) fn aggregate_value(p: &ProviderStatus) -> f64 {
     let Some(b) = &p.balance else {
         return f64::MAX;
     };
@@ -524,6 +527,7 @@ mod tray_title_tests {
             refresh_interval: 60,
             auto_check_update: true,
             tray_text_enabled: true,
+            notifications_enabled: true,
         }
     }
 

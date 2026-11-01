@@ -6,6 +6,8 @@ dist/
 
 # Tauri / Rust
 src-tauri/target/
+# 仓库根下的 Rust 构建缓存（rust-analyzer 等以根目录跑 cargo 时产生）
+/target/
 
 # IDE
 .vscode/
@@ -13,6 +15,9 @@ src-tauri/target/
 *.swp
 *.swo
 *~
+
+# 本地工具产物（Playwright MCP 会话日志等）
+.playwright-mcp/
 
 # OS
 .DS_Store

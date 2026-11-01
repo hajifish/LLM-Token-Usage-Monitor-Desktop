@@ -5,7 +5,8 @@
 //! [`crate::tray::quota_warning_level`] 一致），仅等级恶化（正常→紧张、正常→耗尽、
 //! 紧张→耗尽）时发通知；恢复到正常后基线归 0，再次恶化自然重新武装；等级不变或
 //! 好转不发。应用启动后基线表为空，首轮只记基线不发 —— 避免每次重启对存量告警
-//! 重复轰炸。基线仅存内存、不持久化（brief 约定）。
+//! 重复轰炸。基线仅存内存、不持久化：重启后不对存量告警补发，也免去为旧状态
+//! 做持久化与跨版本迁移的负担。
 //!
 //! 无数据轮（balance 缺失：禁用 / 获取失败）不参与判定也不更新基线，
 //! 避免网络抖动造成「假恢复 → 再恶化」的重复提醒。
@@ -16,9 +17,12 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
-/// macOS 播放系统默认通知音的名字：mac-notification-sys 的 objc 桥对该字符串特判
-/// 映射为 NSUserNotificationDefaultSoundName；Windows/Linux 上该名字解析失败会被
-/// notify-rust 静默忽略（`Sound::from_str(..).ok()`），无副作用
+/// macOS 播放系统默认通知音的名字。特判发生在链路末端：tauri-plugin-notification
+/// → notify-rust **默认**（未启用 preview-macos-un feature）NSUserNotifications 后端
+/// → mac-notification-sys 的 objc 桥对该字符串特判映射为
+/// NSUserNotificationDefaultSoundName——上游若改走其他后端 feature，该特判会悄悄消失。
+/// Windows 上该名字解析失败被 notify-rust 静默忽略（`Sound::from_str(..).ok()`）；
+/// Linux（D-Bus）后端不读取音名、直接忽略，无副作用
 const DEFAULT_SOUND: &str = "NSUserNotificationDefaultSoundName";
 
 /// 单供应商迁移判定（纯函数）：prev 为 None 表示无基线（首轮 / 新出现的供应商）。
@@ -55,10 +59,13 @@ pub(crate) fn progress_text(p: &ProviderStatus) -> String {
     }
 }
 
-/// 供应商判定键：name + alias（scheduler 的 alias 已回退统一显示名）。
-/// 同类型多账号须 alias 唯一：不填别名时两账号回退同一显示名 → 键碰撞，
-/// 仅首个出现的供应商参与判定，后续同键跳过（不发事件、不覆盖基线），
-/// 与前端 providerKey 的「targets.length !== 1 即拒绝执行」保守取向一致。
+/// 供应商判定键：name + alias（scheduler 的 alias 已回退统一显示名，如 Zhipu→智谱）。
+/// 与前端 providerKey **并非同口径**：本键 = name|display_name 回退且不 trim，前端键 =
+/// name|name 回退且 trim，两套键空间互不相交、各自独立演化（本表仅基线自用，前端键
+/// 只做配置行定位）；口径真正相近的是 tray::provider_show_in_tray（本侧仍差一个 trim）。
+/// 同类型多账号须 alias 唯一：不填别名时两账号产生同一键 → 碰撞，仅首个出现的
+/// 供应商参与判定，后续同键跳过（不发事件、不覆盖基线），与前端「targets !== 1
+/// 即拒绝执行」的保守取向一致。
 fn provider_key(p: &ProviderStatus) -> String {
     format!("{}|{}", p.name, p.alias)
 }

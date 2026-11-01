@@ -140,7 +140,10 @@ function Settings({ onBack }: SettingsProps) {
    *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
    *  在途期间 checkbox 置 disabled（可见、可预期），不静默丢弃点击。 */
   const [trayBusy, setTrayBusy] = useState(false);
-  /** 与后端 provider_show_in_tray 同语义的匹配键：name + trim 后 alias（空回退 name）。 */
+  /** 本页的配置行定位键：name + trim 后 alias（空回退 name）。
+   *  与后端 provider_show_in_tray 的匹配键并非同口径：后端空回退 display_name
+   *  （如 Zhipu→智谱），本键空回退 name——两套键空间互不相交，本键仅用于在
+   *  fresh.providers 中唯一定位配置行，不与后端互比。 */
   const providerKey = (p: ProviderConfig) => {
     const a = (p.alias || '').trim();
     return `${p.name}|${a === '' ? p.name : a}`;

@@ -1,8 +1,8 @@
 # Qoder 供应商接入设计
 
-- 日期：2026-10-31
+- 日期：2026-10-31（v2 方案切换：2026-11-01）
 - 分支：`feature/main-window-compact`（用户指定在本分支上补充，不另拉分支）
-- 状态：已确认设计
+- 状态：已确认设计（v2：本地凭据）
 
 ## 背景与目标
 
@@ -16,16 +16,18 @@ Qoder 是阿里基于 Qwen 系模型的 agentic IDE，额度单位为 Credits。
 
 | 项 | 决策 |
 | --- | --- |
-| 区域支持 | 单类型「Qoder」+ 自动探测：每轮先试国际端点，鉴权/404 失败换国内端点 |
-| 凭据来源 | 用户粘贴官方 Personal Access Token（PAT，`pt-` 前缀），复用现有 API Key 加密存储 |
+| 区域支持 | 单类型「Qoder」；凭据来源决定区域（本地凭据按文件路径判定，PAT 保留双区域探测兜底） |
+| 凭据来源 | **默认**：本机 Qoder / Qoder CN 桌面客户端登录凭据（`auth.v1.dat`，见 v2 节）；**兜底**：用户粘贴 PAT（`pt-` 前缀，存 api_key） |
 | 配额展示 | 全部额度桶平铺（计划额度 / 加量包 / 每专属积分包一行） |
 | 主值语义 | 全部额度行中最小 `remaining_percent`（与托盘 `primary_quota` 一致） |
 | 签到 / 多账号 | 不做 |
 | 托盘 emoji | 🟣 |
 
-### 为什么走 PAT 而不是读本地凭据
+### 为什么走 PAT 而不是读本地凭据（v1 时判断，已被 v2 推翻）
 
-本机装了 Qoder 国际版与国内版 IDE，但登录凭据存放在客户端加密存储中，Qoder CLI 也未安装；没有像 `~/.kimi-code/config.toml` 那样可直读的明文凭证文件。PAT 是官方功能（qoder.com / qoder.cn 控制台 → Settings → Personal Access Tokens），且官方 CLI 自身就用 PAT 做非交互认证，稳定性与合规性均优于抓取客户端内部状态。
+> **v2 注**：此节是 v1 的决策依据。后续实测发现 PAT 入口实际不存在（见 v2 节背景变更），且 CreditDaddy 公开源码给出了完整的本地凭据解密配方，路线反转。
+
+v1 时判断：本机装了 Qoder 国际版与国内版 IDE，但登录凭据存放在客户端加密存储中，Qoder CLI 也未安装；没有像 `~/.kimi-code/config.toml` 那样可直读的明文凭证文件。当时认为 PAT 是官方功能，稳定性与合规性均优于抓取客户端内部状态。
 
 ### 接口来源与非官方风险
 
@@ -47,20 +49,55 @@ GET  {base}/api/v2/user/plan           → plan_tier_name
 每轮调度都通过 `create_provider` 新建实例，`QoderProvider` 内用 `OnceCell` 缓存本轮结果：`fetch_balance` 与 `fetch_quota_infos` 共享同一组网络请求（与 `KimiCodeProvider` 同模式）。
 
 ```
-read PAT (from api_key)
-  → resolve_token: pt- 开头则兑换成 jt；否则原样使用（兼容直接粘贴 jt 的用户）
-  → 探测区域:
-       国际: 兑换 + GET quota/usage
-         2xx                        → 使用国际
-         兑换 400/401/403（实测无效/异区域 PAT 返回 400 BadRequest）→ 国内重试
-         查询 401/403/404           → 国内重试
-         其他错误                    → 直接报错（不重试，避免把网络故障误判为区域问题）
-       国内: 同上；凭据仍被拒 → "Qoder PAT 无效或已过期"
-  → 解析 quota/usage
-  → GET user/plan（失败忽略，plan_label 缺省 "Qoder"）
+api_key 非空（PAT 模式）:
+  read PAT → resolve_token: pt- 开头则兑换成 jt；否则原样使用
+  → 探测区域（先国际后国内，凭据被拒/404 切换）→ 解析 quota/usage → plan（尽力）
+
+api_key 为空（本地凭据模式，默认）:
+  扫描 ~/Library/Application Support/com.qoder.app*/auth.v1.dat（国际）
+        ~/Library/Application Support/com.qodercn.app*/auth.v1.dat（国内）
+    → 多候选取 mtime 最新 → 钥匙串密码解密 → JSON 取 token（dt-）
+  → 按文件来源直接选 base（不盲探）→ GET quota/usage → plan（尽力）
 ```
 
-不做跨轮区域缓存：每轮最多多一组请求（默认 120s 刷新间隔），换取无全局状态、账号跨区域切换零感知。
+PAT 模式不做跨轮区域缓存：每轮最多多一组请求（默认 120s 刷新间隔），换取无全局状态、账号跨区域切换零感知。本地凭据模式每轮重读文件——客户端每 60±5 分钟自动刷新 token，重读即自动跟进。
+
+## v2 方案切换（2026-11-01）：本地凭据替代 PAT
+
+### 背景变更
+
+用户实测确认：Qoder 控制台不提供可复制的外部 PAT（「Settings → Personal Access Tokens」入口实际不存在），v1 的粘贴路径对真实用户不可达。社区工具（CreditDaddy）已验证可行路线：读取本机 Qoder / Qoder CN 桌面客户端的登录凭据。协议细节全部来自其公开源码（`src/qoderApp.js` / `src/qoderClient.js` / `src/constants.js`）。
+
+### 凭据链（macOS）
+
+1. **候选文件**：`~/Library/Application Support/com.qoder.app*/auth.v1.dat`（国际）、`~/Library/Application Support/com.qodercn.app*/auth.v1.dat`（国内，本机实存 `com.qodercn.app.stable`）；多候选取 mtime 最新（最近活跃登录）。
+2. **钥匙串密码**：`security find-generic-password -w -s "<N> Safe Storage"`，N 依次试 `Qoder App`、`Qoder CN`。首次访问触发 macOS 标准授权弹窗，用户点「始终允许」后永久静默；应用内再叠加进程级密码缓存（内存，不落盘），即使用户只点「允许」也不会每轮弹窗。
+3. **解密**：文件 = 前缀 `v10` + AES-128-CBC 密文（IV = 16 个空格 0x20），密钥 = PBKDF2-SHA1(密码, `"saltysalt"`, 1003 轮, 16 字节)，PKCS7 去填充。
+4. **明文 JSON**：`{token: "dt-…", refreshToken, expiresAt, user: {id, name, email}}`。只取 `token`，其余字段（含 refreshToken）不落日志。
+
+### 调用链变更
+
+- `dt-` 客户端会话 token **直接作 Bearer**，无需 jobToken 兑换（仅 `pt-` PAT 走兑换，CreditDaddy `resolveToken` 同判据）。
+- 区域不再盲探：`com.qodercn.app*` → 国内 base，`com.qoder.app*` → 国际 base。
+- 查询头补齐对齐客户端：`Cosy-Version`、`Cosy-MachineOS: macos`（原有 `Cosy-ClientType: 10`、`User-Agent: Qoder` 不变）。
+- 不实现 token 刷新（refreshToken 流程需要客户端风控签名，超出监控工具边界）；token 失效时报错引导用户打开客户端重新登录。
+- 安全边界：应用只读用户自己的凭据文件与用户自己的钥匙串项（与 Claude Code / Kimi Code 供应商同性质）；token 不写日志、不落盘、不外传。
+
+### 设置页与调度
+
+- Qoder 加入免密供应商名单：`scheduler.rs` 的 `needs_api_key` 豁免 + `Settings.tsx` 的 `CLI_OAUTH_PROVIDERS`，UI 提示「需已登录 Qoder / Qoder CN 桌面客户端」。
+- api_key 留空 = 本地凭据模式（默认）；非空仍按 PAT 处理（保留 v1 逻辑作为高级兜底，测试继续覆盖）。
+
+### 错误文案（本地凭据模式新增/变更）
+
+| 场景 | 文案 |
+| --- | --- |
+| 未找到凭据文件 | 「未找到 Qoder 客户端登录凭据（auth.v1.dat），请先安装并登录 Qoder / Qoder CN 桌面客户端」 |
+| 钥匙串读取失败 | 「无法读取 Qoder 钥匙串密钥（<原因>），请在 macOS 授权弹窗中点击允许」 |
+| 解密/解析失败 | 「Qoder 本地凭据解析失败（<原因>），客户端格式可能已变更」 |
+| 本地 token 被拒（401/403） | 「Qoder 本地凭据已失效，请打开 Qoder / Qoder CN 客户端重新登录后重试」 |
+
+PAT 模式文案保持 v1 不变。
 
 ## 数据映射
 
@@ -121,9 +158,9 @@ Rust 单测（`qoder.rs` 内，网络函数依赖注入或拆纯函数解析）�
 
 ## 验收标准
 
-1. 设置页添加「Qoder」+ 粘贴有效 PAT 后，托盘与该供应商卡片显示多行配额（计划额度 / 加量包 / 各专属包）。
-2. 国际版与国内版 PAT 分别配置后均能取到数据，无需手动选择区域。
-3. 无效 PAT 显示明确的「PAT 无效或已过期」提示，而非裸 HTTP 状态码。
+1. 已登录 Qoder / Qoder CN 桌面客户端的机器上，设置页添加「Qoder」（无需粘贴任何 Key）后，托盘与卡片显示多行配额（计划额度 / 加量包 / 各专属包）；首次出现钥匙串授权弹窗，允许后不再重复。
+2. 粘贴国际版或国内版 PAT 的兜底模式仍能取到数据，无需手动选择区域。
+3. 本地凭据缺失 / 失效、PAT 无效分别显示对应的明确提示，而非裸 HTTP 状态码。
 4. 专属积分包行显示到期时间但不出现重置倒计时。
 5. `cargo test`、`cargo clippy`、`npm run build`、ESLint 全部通过。
 6. 主窗口与托盘布局在新增该供应商后无破版（行数增多时正常滚动/换行）。
@@ -131,7 +168,7 @@ Rust 单测（`qoder.rs` 内，网络函数依赖注入或拆纯函数解析）�
 ## 不在本次范围
 
 - 每日签到 / 自动领取 Credits；
-- 多账号管理；
-- 网页会话 Cookie 路径与逐资源包明细接口（`/api/v2/me/usages/big_model_credits`）——只认浏览器 Cookie，与 PAT 路线冲突；
+- 多账号管理（多凭据文件只取 mtime 最新一份）；
+- 网页会话 Cookie 路径与逐资源包明细接口（`/api/v2/me/usages/big_model_credits`）——只认浏览器 Cookie；
 - 卡面展示绝对 Credits 数值；
-- 从 Qoder IDE 本地凭据自动读取 PAT。
+- refreshToken 自动刷新流程（需客户端风控签名）。

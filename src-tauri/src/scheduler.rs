@@ -70,8 +70,11 @@ pub(crate) struct ProviderMenuBlock {
     /// 右对齐覆写后的标题；`None` = 保持原始 title（有明细子项或测量不可用）
     aligned_title: Option<String>,
     pub details: Vec<String>,
-    /// 标题拆分（名称 / 值），仅无明细子项的块用于右对齐补空白
+    /// 标题拆分（名称 / 值），仅无明细子项的块用于右对齐补空白。
+    /// 调用链整体在 macOS 门内（Linux CI 构建 lib 目标无调用点，测试使用不算数）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     name: String,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     value: String,
 }
 
@@ -91,7 +94,8 @@ impl ProviderMenuBlock {
         self.aligned_title.as_deref().unwrap_or(&self.title)
     }
 
-    /// 右对齐覆写（仅无明细子项的块会被对齐路径调用）。
+    /// 右对齐覆写（仅无明细子项的块会被对齐路径调用；调用链在 macOS 门内）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn set_aligned_title(&mut self, title: String) {
         self.aligned_title = Some(title);
     }
@@ -230,6 +234,9 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
 
 /// 菜单中带图标的行（NSMenuItem.image 按 18pt 渲染）相对无图标行的标题缩进量。
 /// AppKit 实测：图标列宽 = image 宽 + 5.8；muda 的 IconMenuItem 固定 18pt。
+/// 唯一非测试调用点在下方 `apply_menu_alignment` 的 macOS 门内，
+/// Linux CI 构建 lib 目标会视为 dead code，测试使用不计入（`--all-targets` 分目标编译）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const MENU_ICON_INDENT: f64 = 23.8;
 
 /// 无明细子项的供应商标题右对齐：名称 + 空白 + 值，值的右边界与菜单最宽行末尾对齐。
@@ -238,6 +245,7 @@ const MENU_ICON_INDENT: f64 = 23.8;
 /// 入参为「块 × 是否带图标」的 zip 产物（长度由构造保证一致，无运行时守卫）；
 /// `text_width` 注入测量函数：生产用系统菜单字体（menu_align），测试用假度量。
 /// 任一测量失败即整体放弃，保持原样。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn align_menu_titles<F>(blocks: Vec<(&mut ProviderMenuBlock, bool)>, text_width: F)
 where
     F: Fn(&str) -> Option<f64>,
@@ -286,6 +294,7 @@ where
 }
 
 /// 在名称与值之间插入空白，使整行宽度尽量贴近 `target`（不超出）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn pad_title<F>(
     name: &str,
     value: &str,

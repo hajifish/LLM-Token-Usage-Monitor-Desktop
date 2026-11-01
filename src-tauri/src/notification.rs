@@ -127,7 +127,7 @@ pub(crate) fn detect_alert_transitions(
 
 /// 各供应商上一轮告警等级基线（内存态；重启归零 → 启动首轮只记基线不发）。
 #[derive(Default)]
-pub struct AlertBaseline(Mutex<HashMap<String, u8>>);
+pub(crate) struct AlertBaseline(Mutex<HashMap<String, u8>>);
 
 /// 轮询收口点：更新基线并按需发送系统通知。enabled 门控下沉在
 /// [`detect_alert_transitions`] 内（关开关期间基线照记、事件过滤为空），
@@ -449,6 +449,29 @@ mod tests {
         let (_, next) = detect_alert_transitions(&prev, &s, false);
         let (events, _) = detect_alert_transitions(&next, &s, true);
         assert!(events.is_empty(), "重开开关后同等级不应补发通知");
+    }
+
+    #[test]
+    fn orphan_baseline_keys_survive_without_events() {
+        // 孤儿基线键（改别名 / 删供应商留下）：本轮该账号不在 → 无事件、键保留
+        // （基线表不清理孤儿键，量级可忽略；语义固化：删除后重加同名同别名且仍处
+        // 耗尽的账号，首轮因持有旧基线而不发通知）
+        let prev = HashMap::from([
+            ("DeepSeek|已删除账号".to_string(), 2u8),
+            ("DeepSeek|DeepSeek".to_string(), 0u8),
+        ]);
+        let s = summary(vec![status(
+            "DeepSeek",
+            "DeepSeek",
+            Some(balance(50.0, "CNY")),
+        )]);
+        let (events, next) = detect_alert_transitions(&prev, &s, true);
+        assert!(events.is_empty(), "孤儿键对应账号不在本轮，不应产生事件");
+        assert_eq!(
+            next.get("DeepSeek|已删除账号"),
+            Some(&2u8),
+            "孤儿键应原样保留（next 由 prev 克隆而来，不做清理）"
+        );
     }
 
     // ---------- progress_text：进度文案与状态条同源 ----------

@@ -149,6 +149,11 @@ mod quota_reset_at_tests {
         let q: QuotaInfo = serde_json::from_str(json).unwrap();
         assert!(q.reset_at.is_none());
     }
+}
+
+#[cfg(test)]
+mod notifications_default_tests {
+    use super::*;
 
     #[test]
     fn notifications_enabled_defaults_true_for_legacy_config() {

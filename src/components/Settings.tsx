@@ -29,8 +29,7 @@ const KEYLESS_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']
  * 其他平台该路径必然失败，需回退为 PAT 输入（#88）。用 navigator.platform / userAgent
  * 做最小侵入探测，不引入 Tauri 插件。
  */
-const IS_MAC =
-  /Mac/i.test(navigator.platform || '') || /Mac OS X/i.test(navigator.userAgent);
+const IS_MAC = /Mac/i.test(navigator.platform || '') || /Mac OS X/i.test(navigator.userAgent);
 
 /** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
 const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';

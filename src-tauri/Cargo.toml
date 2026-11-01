@@ -24,7 +24,8 @@ tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["time", "sync", "macros"] }
+# rt：spawn_blocking——Qoder 钥匙串链路（可阻塞 60s 的授权弹窗）必须脱离 async worker
+tokio = { version = "1", features = ["time", "sync", "macros", "rt"] }
 reqwest = { version = "0.12", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"

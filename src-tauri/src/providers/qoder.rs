@@ -24,8 +24,11 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha1::Sha1;
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// 国际版 openapi 基址（qoder.com 账号）
 pub(crate) const GLOBAL_API_BASE: &str = "https://openapi.qoder.sh";
@@ -216,68 +219,175 @@ fn to_provider_error(e: StepError, local: bool) -> ProviderError {
 
 // --- 本地凭据层（auth.v1.dat，macOS Electron safeStorage） ---
 
-/// 钥匙串 Safe Storage 服务名 → 密码缓存（含负缓存）：
-/// 用户在弹窗只点「允许」时，避免每个调度轮（默认 120s）重复弹窗。
-/// 仅存内存，不落盘；重启应用后重新授权。
-static KEYCHAIN_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+/// security 子进程总超时：未授权钥匙串项会弹 macOS 授权框并阻塞到用户应答，
+/// 超时后 kill 子进程再报错——blocking 线程不泄漏、弹窗进程不堆积（issue #89）
+const SECURITY_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
+/// try_wait 轮询间隔
+const SECURITY_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// 钥匙串负缓存 TTL：被拒/空结果的查询静默 90s，过期重查（issue #90）。
+/// 与调度间隔（默认 120s）同量级：既避免每轮重复弹窗，也让「之后才登录」
+/// 或「改点允许」的用户无需重启应用即可恢复。
+const KEYCHAIN_NEG_TTL: Duration = Duration::from_secs(90);
 
-/// `security find-generic-password -w`（与 CreditDaddy 同查询）；失败原因取 stderr 首行
-fn security_find_generic_password(service: &str) -> Option<String> {
-    let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-w", "-s", service])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        log::debug!(
-            "Qoder 钥匙串项 {} 不可用: {}",
-            service,
-            String::from_utf8_lossy(&out.stderr)
-                .lines()
-                .next()
-                .unwrap_or("")
-        );
-        return None;
-    }
-    let pw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!pw.is_empty()).then_some(pw)
+/// 钥匙串查询结果缓存条目
+enum KeychainCacheEntry {
+    /// 成功查到的密码：进程级永久缓存（Safe Storage 密码在客户端登录期内不变）
+    Password(String),
+    /// 负缓存：记录写入时刻，TTL 过期后重查
+    Missed(Instant),
 }
 
-fn keychain_password(service: &str) -> Option<String> {
-    let cache = KEYCHAIN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = cache.lock().expect("keychain cache poisoned");
-    if let Some(hit) = map.get(service) {
-        return hit.clone();
+/// 钥匙串 Safe Storage 服务名 → 查询结果缓存：
+/// - 成功（`Password`）：进程级永久缓存——用户在授权弹窗点「允许」后避免
+///   每个调度轮（默认 120s）重复弹窗；
+/// - 失败（`Missed` 负缓存）：只静默 TTL 90s，过期重查——弹窗被拒、超时、
+///   或应用先装客户端后装的用户，都无需重启应用即可恢复（issue #90）。
+///
+/// 仅存内存，不落盘；重启应用后重新授权。
+static KEYCHAIN_CACHE: OnceLock<Mutex<HashMap<String, KeychainCacheEntry>>> = OnceLock::new();
+
+/// 读干子进程管道输出（输出量级很小，且进程已退出后读取不会阻塞）
+fn read_pipe_output(pipe: Option<impl Read>) -> String {
+    let mut buf = String::new();
+    if let Some(mut p) = pipe {
+        let _ = p.read_to_string(&mut buf);
     }
-    let pw = security_find_generic_password(service);
-    map.insert(service.to_string(), pw.clone());
-    pw
+    buf
+}
+
+/// `security find-generic-password -w`（与 CreditDaddy 同查询；绝对路径防 PATH
+/// 劫持，issue #97）。阻塞模型（issue #89）：未授权项会弹 macOS 授权框并阻塞
+/// 到用户应答，故不走 `.output()` 死等，而是 spawn 后以 50ms 间隔轮询
+/// `try_wait`，总超时 60s，超时 `kill()` 子进程再报错。
+/// 返回：`Ok(Some)` 密码；`Ok(None)` 查不到（项不存在/被拒/空密码，均留 warn
+/// 日志）；`Err` 授权等待超时（文案直接面向用户，调用方短路直报）。
+fn security_find_generic_password(service: &str) -> Result<Option<String>, String> {
+    let mut child = match Command::new("/usr/bin/security")
+        .args(["find-generic-password", "-w", "-s", service])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Qoder 钥匙串查询无法启动 /usr/bin/security: {e}");
+            return Ok(None);
+        }
+    };
+    let deadline = Instant::now() + SECURITY_QUERY_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    break None;
+                }
+                std::thread::sleep(SECURITY_POLL_INTERVAL);
+            }
+            Err(e) => {
+                log::warn!("Qoder 钥匙串查询 security 子进程状态不可读: {e}");
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(None);
+            }
+        }
+    };
+    let Some(status) = status else {
+        // 超时：kill 后 reap，授权弹窗进程随之回收，不留悬挂进程
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!(
+            "Qoder 钥匙串授权等待超时（{}s），请重试或在弹窗中点击允许",
+            SECURITY_QUERY_TIMEOUT.as_secs()
+        ));
+    };
+    if !status.success() {
+        // 只留服务名与失败原因（stderr 首行，如 errAuthorizationDenied /
+        // item not found），不含任何密码/token（issue #91）
+        let stderr = read_pipe_output(child.stderr.take());
+        log::warn!(
+            "Qoder 钥匙串项 {service} 查询失败（{status}）: {}",
+            stderr.lines().next().unwrap_or("")
+        );
+        return Ok(None);
+    }
+    let pw = read_pipe_output(child.stdout.take());
+    let pw = pw.trim().to_string();
+    if pw.is_empty() {
+        log::warn!("Qoder 钥匙串项 {service} 返回空密码，按查询失败处理");
+        return Ok(None);
+    }
+    Ok(Some(pw))
+}
+
+/// 服务名 → 密码（含缓存）。命中缓存直接返回；未命中才走子进程查询，
+/// 且查询期间不持锁——一次授权等待可长达 60s，持锁会串行阻塞其他查询。
+/// `Err` 仅在授权等待超时时出现（不入缓存：下一轮调度重新弹窗给用户应答机会）。
+fn keychain_password(service: &str) -> Result<Option<String>, String> {
+    let cache = KEYCHAIN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().expect("keychain cache poisoned").get(service) {
+        match hit {
+            KeychainCacheEntry::Password(pw) => return Ok(Some(pw.clone())),
+            // 负缓存 TTL 内静默：弹窗被拒后不每轮重复弹
+            KeychainCacheEntry::Missed(at) if at.elapsed() < KEYCHAIN_NEG_TTL => {
+                return Ok(None);
+            }
+            // 负缓存过期：走真实重查
+            KeychainCacheEntry::Missed(_) => {}
+        }
+    }
+    let pw = security_find_generic_password(service)?;
+    let entry = match &pw {
+        Some(p) => KeychainCacheEntry::Password(p.clone()),
+        None => KeychainCacheEntry::Missed(Instant::now()),
+    };
+    cache
+        .lock()
+        .expect("keychain cache poisoned")
+        .insert(service.to_string(), entry);
+    Ok(pw)
 }
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
+/// 解密失败分类（issue #92）：决定「换一把钥匙」是否有意义
+#[derive(Debug, PartialEq, Eq)]
+enum DecryptError {
+    /// 与钥匙无关（未知加密格式前缀 / 文件过小）：换钥匙串名无意义，
+    /// 调用方应短路并把它作为最终错误上报
+    Format(String),
+    /// 与钥匙相关（PKCS7 去填充失败 / 非 UTF-8）：换下一把钥匙继续试
+    KeyMismatch(String),
+}
+
 /// 解密 auth.v1.dat：`v10` + AES-128-CBC（IV = 16 个空格），
 /// 密钥 = PBKDF2-SHA1(密码, "saltysalt", 1003 轮, 16 字节)，PKCS7 填充。
 /// 配方来自 CreditDaddy（qoderApp.js safeStorageCodec），与客户端实测一致。
-fn decrypt_auth_dat(data: &[u8], password: &str) -> Result<String, String> {
+fn decrypt_auth_dat(data: &[u8], password: &str) -> Result<String, DecryptError> {
     if data.len() < 3 + 16 {
-        return Err(format!("文件过小（{} 字节）", data.len()));
+        return Err(DecryptError::Format(format!(
+            "文件过小（{} 字节）",
+            data.len()
+        )));
     }
     if &data[..3] != b"v10" {
-        return Err(format!(
+        return Err(DecryptError::Format(format!(
             "未知加密格式前缀 {:?}",
             String::from_utf8_lossy(&data[..3])
-        ));
+        )));
     }
     let mut key = [0u8; 16];
     pbkdf2_hmac::<Sha1>(password.as_bytes(), b"saltysalt", 1003, &mut key);
     let iv = [0x20u8; 16];
     let mut buf = data[3..].to_vec();
-    let dec =
-        Aes128CbcDec::new_from_slices(&key, &iv).map_err(|e| format!("密钥/IV 长度错误: {e}"))?;
-    let plain = dec
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
-        .map_err(|e| format!("PKCS7 去填充失败（密钥不匹配或数据损坏）: {e}"))?;
-    String::from_utf8(plain.to_vec()).map_err(|_| "解密结果非 UTF-8".to_string())
+    let dec = Aes128CbcDec::new_from_slices(&key, &iv)
+        .map_err(|e| DecryptError::KeyMismatch(format!("密钥/IV 长度错误: {e}")))?;
+    let plain = dec.decrypt_padded_mut::<Pkcs7>(&mut buf).map_err(|e| {
+        DecryptError::KeyMismatch(format!("PKCS7 去填充失败（密钥不匹配或数据损坏）: {e}"))
+    })?;
+    String::from_utf8(plain.to_vec())
+        .map_err(|_| DecryptError::KeyMismatch("解密结果非 UTF-8".to_string()))
 }
 
 /// 从解密后的 JSON 提取会话 token（dt-…）；只取 token，其余字段不外泄
@@ -347,55 +457,163 @@ fn auth_candidates() -> Vec<AuthCandidate> {
         .unwrap_or_default()
 }
 
-/// 读取本地凭据：候选按 mtime 降序 × 钥匙串名候选逐组合试，
-/// **以「解密成功且含 token」为准**——机器上同存多个 Qoder 系 Safe Storage
-/// 项（登录壳 / IDE / 国际版），先拿到的密码未必是加密本文件的那把。
-/// 首次命中未授权项触发钥匙串授权弹窗；密码随后进程内缓存。
-fn read_local_credential() -> Result<(String, &'static str), ProviderError> {
-    let candidates = auth_candidates();
-    if candidates.is_empty() {
-        return Err(ProviderError(
-            "未找到 Qoder 客户端登录凭据（auth.v1.dat），请先安装并登录 Qoder / Qoder CN 桌面客户端"
-                .to_string(),
-        ));
+/// 候选遍历中的失败留痕（issue #92）：全部组合失败时只上报信息量最高的一类，
+/// 而非「最后一个」。优先级：Format（短路直报，不参与比较）> 钥匙串不可用
+/// > 钥匙不匹配 > 缺 token > 文件读取失败。
+#[derive(Default)]
+enum FailureNote {
+    /// 候选为空（客户端未安装）
+    #[default]
+    None,
+    /// 文件读取失败（权限/损坏）
+    FileRead(String),
+    /// 解密成功但内容缺 token
+    MissingToken(String),
+    /// 所有拿到的钥匙都解不开本文件
+    KeyMismatch(String),
+    /// 钥匙串查询不可用（弹窗被拒/项不存在）
+    KeychainUnavailable(String),
+}
+
+impl FailureNote {
+    fn rank(&self) -> u8 {
+        match self {
+            FailureNote::None => 0,
+            FailureNote::FileRead(_) => 1,
+            FailureNote::MissingToken(_) => 2,
+            FailureNote::KeyMismatch(_) => 3,
+            FailureNote::KeychainUnavailable(_) => 4,
+        }
     }
-    let mut last_err = String::new();
+
+    /// 只保留信息量更高者；同级保留先出现者（先出现的候选 mtime 更新、更相关）
+    fn record(&mut self, next: Self) {
+        if next.rank() > self.rank() {
+            *self = next;
+        }
+    }
+
+    fn into_provider_error(self) -> ProviderError {
+        match self {
+            FailureNote::None => ProviderError(
+                "未找到 Qoder 客户端登录凭据（auth.v1.dat），请先安装并登录 Qoder / Qoder CN 桌面客户端"
+                    .to_string(),
+            ),
+            FailureNote::FileRead(msg)
+            | FailureNote::MissingToken(msg)
+            | FailureNote::KeyMismatch(msg)
+            | FailureNote::KeychainUnavailable(msg) => ProviderError(msg),
+        }
+    }
+}
+
+/// 钥匙串整体不可用（弹窗被拒/项不存在/空密码）的最终文案。
+/// #90：指引不再死胡同——点不了允许的话，明说重启应用才是出路。
+const KEYCHAIN_UNAVAILABLE_MSG: &str = "无法读取 Qoder 钥匙串密钥（Safe Storage），请在 macOS 授权弹窗中点击允许（已暂时跳过后续弹窗，若始终失败请重启本应用）";
+
+/// 多钥匙试解决策核心（可注入，issue #100）：候选列表 × 钥匙串名 × 解密判定
+/// × last_err 决策全部收敛在此纯逻辑，真实钥匙串查找由 `read_local_credential`
+/// 注入，测试可注入 fake 覆盖各失败组合。
+/// - `lookup`：服务名 → 密码。`Ok(None)` = 项不存在/被拒/空密码（换下一个候选名）；
+///   `Err` = 授权等待超时（用户多半不在场，继续换名只会连环弹窗，短路整轮直报）
+/// - `decrypt`：密文 + 密码 → 明文。`Format`（与钥匙无关）短路整轮直报；
+///   `KeyMismatch` 换下一把钥匙
+fn resolve_local_credential_with(
+    candidates: &[AuthCandidate],
+    mut lookup: impl FnMut(&str) -> Result<Option<String>, String>,
+    decrypt: impl Fn(&[u8], &str) -> Result<String, DecryptError>,
+) -> Result<(String, &'static str), ProviderError> {
+    let mut note = FailureNote::None;
     for c in candidates {
         let data = match std::fs::read(&c.path) {
             Ok(d) => d,
             Err(e) => {
-                last_err = format!("读取 {} 失败: {e}", c.path.display());
+                log::debug!(
+                    "Qoder 候选凭据 {} 读取失败（FileRead），跳过该候选: {e}",
+                    c.path.display()
+                );
+                note.record(FailureNote::FileRead(format!(
+                    "读取 {} 失败: {e}",
+                    c.path.display()
+                )));
                 continue;
             }
         };
+        let path = c.path.display().to_string();
         for name in c.keychain_names {
-            let Some(password) = keychain_password(&format!("{name} Safe Storage")) else {
-                last_err =
-                    "无法读取 Qoder 钥匙串密钥（Safe Storage），请在 macOS 授权弹窗中点击允许"
-                        .to_string();
-                continue;
+            let service = format!("{name} Safe Storage");
+            let password = match lookup(&service) {
+                Ok(Some(pw)) => pw,
+                Ok(None) => {
+                    log::debug!(
+                        "Qoder 候选 {path} × 钥匙串 {service} 不可用（KeychainUnavailable），换下一个候选名"
+                    );
+                    note.record(FailureNote::KeychainUnavailable(
+                        KEYCHAIN_UNAVAILABLE_MSG.to_string(),
+                    ));
+                    continue;
+                }
+                Err(timeout_msg) => {
+                    log::debug!(
+                        "Qoder 候选 {path} × 钥匙串 {service} 授权等待超时，短路整轮不再弹窗"
+                    );
+                    return Err(ProviderError(timeout_msg));
+                }
             };
-            let token = match decrypt_auth_dat(&data, &password) {
-                Ok(plain) => parse_auth_token(&plain),
-                Err(_) => {
+            let plain = match decrypt(&data, &password) {
+                Ok(plain) => plain,
+                Err(DecryptError::Format(msg)) => {
+                    // 与钥匙无关的格式问题：试其余钥匙串名没有意义，
+                    // 短路并直接上报真实原因，不误导用户去查钥匙串（issue #92）
+                    log::debug!(
+                        "Qoder 候选 {path} × 钥匙串 {service} 格式不符（Format），短路整轮: {msg}"
+                    );
+                    return Err(ProviderError(format!(
+                        "Qoder 本地凭据格式无法识别（{msg}），客户端加密格式可能已变更，需等待本应用更新跟进"
+                    )));
+                }
+                Err(DecryptError::KeyMismatch(msg)) => {
                     // 该钥匙串项不是加密本文件的密钥，换下一个候选名
-                    last_err =
+                    log::debug!(
+                        "Qoder 候选 {path} × 钥匙串 {service} 钥匙不匹配（KeyMismatch），换下一个候选名: {msg}"
+                    );
+                    note.record(FailureNote::KeyMismatch(
                         "Qoder 本地凭据解密失败（钥匙串密钥均不匹配），客户端存储格式可能已变更"
-                            .to_string();
+                            .to_string(),
+                    ));
                     continue;
                 }
             };
-            match token {
+            match parse_auth_token(&plain) {
                 Some(t) => return Ok((t, c.base)),
                 None => {
-                    last_err =
+                    // 解密成功 = 这把钥匙就是对的，只是内容缺 token：
+                    // 同候选其余名字只会产生无关噪音，直接续下一候选
+                    log::debug!(
+                        "Qoder 候选 {path} × 钥匙串 {service} 解密成功但缺 token（MissingToken），换下一个候选"
+                    );
+                    note.record(FailureNote::MissingToken(
                         "Qoder 本地凭据解析失败（解密内容缺 token），客户端存储格式可能已变更"
-                            .to_string()
+                            .to_string(),
+                    ));
+                    break;
                 }
             }
         }
     }
-    Err(ProviderError(last_err))
+    Err(note.into_provider_error())
+}
+
+/// 读取本地凭据：候选按 mtime 降序 × 钥匙串名候选逐组合试，
+/// **以「解密成功且含 token」为准**——机器上同存多个 Qoder 系 Safe Storage
+/// 项（登录壳 / IDE / 国际版），先拿到的密码未必是加密本文件的那把。
+/// 首次命中未授权项触发钥匙串授权弹窗（最长等 60s）；成功密码进程内永久
+/// 缓存，失败走 90s 负缓存。
+/// 同步签名（文件 IO + 子进程 + 解密全程阻塞）便于测试；async 调用方必须包
+/// `spawn_blocking`（见 `fetch_snapshot`），避免冻结调度数据面（issue #89）。
+fn read_local_credential() -> Result<(String, &'static str), ProviderError> {
+    let candidates = auth_candidates();
+    resolve_local_credential_with(&candidates, keychain_password, decrypt_auth_dat)
 }
 
 /// 轮内快照：fetch_balance 与 fetch_quota_infos 共享一次网络链路
@@ -432,11 +650,16 @@ impl QoderProvider {
 
     /// 本地凭据模式：按凭据文件来源直连对应区域（不盲探）。
     /// PAT 模式：先国际后国内；国际失败且可切换时重试国内，否则直接短路。
-    /// 不缓存「区域归属」：每轮最多多一组请求（默认 120s 间隔），换无全局状态。
+    /// 不缓存「区域归属」：每轮最多多一组请求（默认 120s 间隔），换取无全局状态。
     async fn fetch_snapshot(&self) -> Result<QoderSnapshot, ProviderError> {
         if self.local {
-            // 每轮重读文件：客户端每 60±5 分钟自刷 token，重读即自动跟进
-            let (token, base) = read_local_credential()?;
+            // 每轮重读文件：客户端每 60±5 分钟自刷 token，重读即自动跟进。
+            // 文件 IO + security 子进程（授权弹窗最长等 60s）+ 解密全程阻塞，
+            // 丢进 blocking 线程池执行，不占死 async worker、不冻结调度数据面
+            //（issue #89）
+            let (token, base) = tokio::task::spawn_blocking(read_local_credential)
+                .await
+                .map_err(|e| ProviderError(format!("Qoder 本地凭据读取任务异常终止: {e}")))??;
             let rows = self
                 .fetch_from_base(base, &token)
                 .await
@@ -772,6 +995,11 @@ mod tests {
 
     /// 造一份 auth.v1.dat 密文（与客户端同算法：v10 + AES-128-CBC + PKCS7）
     fn sealed_auth_dat(plain: &str, password: &str) -> Vec<u8> {
+        sealed_auth_dat_bytes(plain.as_bytes(), password)
+    }
+
+    /// 同上，明文可为任意字节（覆盖「解密成功但非 UTF-8」分类）
+    fn sealed_auth_dat_bytes(plain: &[u8], password: &str) -> Vec<u8> {
         use cbc::cipher::BlockEncryptMut;
         type Aes128CbcEnc = cbc::Encryptor<Aes128>;
         let mut key = [0u8; 16];
@@ -779,7 +1007,7 @@ mod tests {
         let iv = [0x20u8; 16];
         let enc = Aes128CbcEnc::new_from_slices(&key, &iv).unwrap();
         let msg_len = plain.len();
-        let mut buf = plain.as_bytes().to_vec();
+        let mut buf = plain.to_vec();
         buf.resize(msg_len + 16, 0); // 预留 PKCS7 填充块
         let ct = enc.encrypt_padded_mut::<Pkcs7>(&mut buf, msg_len).unwrap();
         let mut data = b"v10".to_vec();
@@ -826,15 +1054,32 @@ mod tests {
     fn decrypt_auth_dat_rejects_wrong_key_and_unknown_prefix() {
         let data = sealed_auth_dat(r#"{"token":"dt-x"}"#, "right");
         let err = decrypt_auth_dat(&data, "wrong").unwrap_err();
-        assert!(err.contains("PKCS7"), "got: {err}");
+        assert!(
+            matches!(err, DecryptError::KeyMismatch(ref m) if m.contains("PKCS7")),
+            "got: {err:?}"
+        );
         let mut v11 = sealed_auth_dat(r#"{"token":"dt-x"}"#, "k");
         v11[..3].copy_from_slice(b"v11");
-        assert!(decrypt_auth_dat(&v11, "k")
-            .unwrap_err()
-            .contains("未知加密格式"));
-        assert!(decrypt_auth_dat(b"v1", "k")
-            .unwrap_err()
-            .contains("文件过小"));
+        let err = decrypt_auth_dat(&v11, "k").unwrap_err();
+        assert!(
+            matches!(err, DecryptError::Format(ref m) if m.contains("未知加密格式")),
+            "got: {err:?}"
+        );
+        let err = decrypt_auth_dat(b"v1", "k").unwrap_err();
+        assert!(
+            matches!(err, DecryptError::Format(ref m) if m.contains("文件过小")),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn decrypt_auth_dat_classifies_non_utf8_plaintext_as_key_mismatch() {
+        let data = sealed_auth_dat_bytes(&[0xff, 0xfe, 0x00, 0x01], "k");
+        let err = decrypt_auth_dat(&data, "k").unwrap_err();
+        assert!(
+            matches!(err, DecryptError::KeyMismatch(ref m) if m.contains("UTF-8")),
+            "got: {err:?}"
+        );
     }
 
     #[test]
@@ -886,6 +1131,152 @@ mod tests {
         std::fs::create_dir_all(scratch.0.join("com.qodercn.app.stable")).unwrap();
         assert!(auth_candidates_under(&scratch.0).is_empty());
         assert!(auth_candidates_under(&scratch.0.join("no-such-dir")).is_empty());
+    }
+
+    // ---- 多钥匙试解决策（可注入纯逻辑，issue #100） ----
+
+    fn candidate_at(
+        path: PathBuf,
+        base: &'static str,
+        names: &'static [&'static str],
+    ) -> AuthCandidate {
+        AuthCandidate {
+            path,
+            base,
+            keychain_names: names,
+        }
+    }
+
+    /// (a) 某候选解密成功但缺 token：不再试同候选其余钥匙串名（钥匙已对，
+    /// 余下只是噪音），直接续下一候选并成功返回
+    #[test]
+    fn resolve_continues_to_next_candidate_when_decrypted_content_lacks_token() {
+        let scratch = ScratchDir::new("resolve-token");
+        let c1 = scratch.0.join("c1-auth.dat");
+        std::fs::write(&c1, sealed_auth_dat(r#"{"refreshToken":"rt"}"#, "k1")).unwrap();
+        let c2 = scratch.0.join("c2-auth.dat");
+        std::fs::write(&c2, sealed_auth_dat(r#"{"token":"dt-good"}"#, "k2")).unwrap();
+        let candidates = vec![
+            candidate_at(c1, CN_API_BASE, &["A1", "A2"]),
+            candidate_at(c2, GLOBAL_API_BASE, &["B1"]),
+        ];
+        let mut queries: Vec<String> = Vec::new();
+        let result = resolve_local_credential_with(
+            &candidates,
+            |service| {
+                queries.push(service.to_string());
+                Ok(Some(match service {
+                    "A1 Safe Storage" => "k1".to_string(),
+                    "B1 Safe Storage" => "k2".to_string(),
+                    _ => return Ok(None),
+                }))
+            },
+            decrypt_auth_dat,
+        )
+        .unwrap();
+        assert_eq!(result, ("dt-good".to_string(), GLOBAL_API_BASE));
+        assert_eq!(queries, ["A1 Safe Storage", "B1 Safe Storage"]);
+    }
+
+    /// (b) Format 类错误（未知加密格式前缀，与钥匙无关）：只试第一把钥匙即
+    /// 短路整轮，该错误直接作为最终错误，不再误报「钥匙串不匹配」
+    #[test]
+    fn resolve_short_circuits_on_format_error() {
+        let scratch = ScratchDir::new("resolve-format");
+        let mut v11 = sealed_auth_dat(r#"{"token":"dt-x"}"#, "k1");
+        v11[..3].copy_from_slice(b"v11");
+        let c1 = scratch.0.join("c1-auth.dat");
+        std::fs::write(&c1, v11).unwrap();
+        let c2 = scratch.0.join("c2-auth.dat");
+        std::fs::write(&c2, sealed_auth_dat(r#"{"token":"dt-good"}"#, "k2")).unwrap();
+        let candidates = vec![
+            candidate_at(c1, CN_API_BASE, &["A1", "A2"]),
+            candidate_at(c2, GLOBAL_API_BASE, &["B1"]),
+        ];
+        let mut queries: Vec<String> = Vec::new();
+        let err = resolve_local_credential_with(
+            &candidates,
+            |service| {
+                queries.push(service.to_string());
+                Ok(Some("k1".to_string()))
+            },
+            decrypt_auth_dat,
+        )
+        .unwrap_err();
+        assert!(err.0.contains("格式无法识别"), "got: {}", err.0);
+        assert!(err.0.contains("未知加密格式"), "got: {}", err.0);
+        assert_eq!(
+            queries,
+            ["A1 Safe Storage"],
+            "短路：其余钥匙串名与候选不再试"
+        );
+    }
+
+    /// (c) 全组合失败：last_err 取信息量最高的一类（钥匙串不可用 > 钥匙不匹配
+    /// > 文件读取失败），而非最后发生的那个
+    #[test]
+    fn resolve_reports_most_informative_failure_when_all_combinations_fail() {
+        let scratch = ScratchDir::new("resolve-priority");
+        // 候选 1：文件读取失败（路径指向目录）
+        let c1 = candidate_at(scratch.0.clone(), CN_API_BASE, &["A1"]);
+        // 候选 2：文件完好但钥匙串查询被拒
+        let c2_path = scratch.0.join("c2-auth.dat");
+        std::fs::write(&c2_path, sealed_auth_dat(r#"{"token":"dt-x"}"#, "k2")).unwrap();
+        let c2 = candidate_at(c2_path, GLOBAL_API_BASE, &["B1"]);
+        // 候选 3：拿得到密码但解不开（PKCS7）
+        let c3_path = scratch.0.join("c3-auth.dat");
+        std::fs::write(&c3_path, sealed_auth_dat(r#"{"token":"dt-x"}"#, "k3")).unwrap();
+        let c3 = candidate_at(c3_path, GLOBAL_API_BASE, &["C1"]);
+        let candidates = vec![c1, c2, c3];
+
+        let err = resolve_local_credential_with(
+            &candidates,
+            |service| {
+                Ok(match service {
+                    "C1 Safe Storage" => Some("wrong-key".to_string()),
+                    _ => None,
+                })
+            },
+            decrypt_auth_dat,
+        )
+        .unwrap_err();
+        assert!(
+            err.0.contains("授权弹窗") && err.0.contains("重启本应用"),
+            "应取「钥匙串不可用」而非后发生的 KeyMismatch，got: {}",
+            err.0
+        );
+    }
+
+    /// 授权等待超时（lookup Err）：短路整轮直接上报超时文案，不连环弹窗
+    #[test]
+    fn resolve_short_circuits_when_keychain_authorization_times_out() {
+        let scratch = ScratchDir::new("resolve-timeout");
+        let path = scratch.0.join("auth.dat");
+        std::fs::write(&path, sealed_auth_dat(r#"{"token":"dt-x"}"#, "k")).unwrap();
+        let candidates = vec![candidate_at(path, CN_API_BASE, &["A1", "A2"])];
+        let mut queries: Vec<String> = Vec::new();
+        let err = resolve_local_credential_with(
+            &candidates,
+            |service| {
+                queries.push(service.to_string());
+                Err("Qoder 钥匙串授权等待超时（60s），请重试或在弹窗中点击允许".to_string())
+            },
+            decrypt_auth_dat,
+        )
+        .unwrap_err();
+        assert!(err.0.contains("超时（60s）"), "got: {}", err.0);
+        assert_eq!(queries.len(), 1, "超时后不再对后续钥匙串名连环弹窗");
+    }
+
+    /// 无候选（客户端未安装）：专门的「未找到」文案而非空口径
+    #[test]
+    fn resolve_without_candidates_reports_missing_client() {
+        let err = resolve_local_credential_with(&[], |_| Ok(None), decrypt_auth_dat).unwrap_err();
+        assert!(
+            err.0.contains("未找到 Qoder 客户端登录凭据"),
+            "got: {}",
+            err.0
+        );
     }
 
     // ---- 手动 E2E：CI 不跑（无凭据） ----

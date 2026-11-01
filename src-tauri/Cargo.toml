@@ -6,7 +6,7 @@ authors = ["hajifish"]
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop"
+repository = "https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop"
 
 [lib]
 name = "local_llm_token_usage_monitor_lib"

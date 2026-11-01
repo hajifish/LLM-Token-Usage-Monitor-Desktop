@@ -1,8 +1,8 @@
-# Local LLM Token Usage Monitor Desktop
+# LLM Token Usage Monitor Desktop
 
-A lightweight desktop application for monitoring token usage and balances across multiple LLM providers. Built with Tauri, React, TypeScript, and Rust.
+A lightweight desktop application for monitoring token usage and balances across multiple local LLM providers. Built with Tauri, React, TypeScript, and Rust.
 
-![License](https://img.shields.io/github/license/hajifish/Local-LLM-Token-Usage-Monitor-Desktop)
+![License](https://img.shields.io/github/license/hajifish/LLM-Token-Usage-Monitor-Desktop)
 
 ## Preview
 
@@ -12,20 +12,22 @@ A lightweight desktop application for monitoring token usage and balances across
 
 ## Features
 
-- **Multi-Provider Support** — Monitor usage across multiple LLM platforms:
-  - DeepSeek
-  - Kimi (Moonshot)
-  - Zhipu (GLM)
-- **Real-Time Usage Tracking** — View token consumption and remaining balance at a glance
-- **System Tray Integration** — Runs quietly in the background with a native tray icon
+- **Multi-Provider Support** — Monitor several LLM platforms at once:
+  - DeepSeek / Kimi API (Moonshot) / Zhipu (GLM)
+  - OpenAI / Anthropic (requires an organization admin key)
+  - Codex / Claude Code / Kimi Code (reads local CLI credentials automatically)
+  - Qoder (reads local client credentials on macOS; on other platforms, enter a personal access token)
+- **Real-Time Usage Tracking** — View token consumption, balances, and remaining percentages for multiple quota buckets at a glance
+- **Low-Balance Notifications** — System notifications when a balance or quota alert worsens; can be toggled in Settings and verified with a test notification
+- **System Tray Integration** — Runs quietly in the background with a native tray icon; metric values are right-aligned in the menu on macOS
 - **Auto-Start** — Optionally launch on system startup
-- **Periodic Polling** — Automatically refreshes usage data on a configurable schedule
+- **Periodic Polling** — Automatically refreshes usage data on a configurable interval (selectable from the tray menu)
 - **In-App Auto-Update** — Checks for new versions automatically and installs them in place, then restarts
 - **Low Resource Footprint** — Powered by Tauri's lightweight Rust backend
 
 ## Download
 
-Head to [GitHub Releases](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/releases) to download the latest version.
+Head to [GitHub Releases](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/releases) to download the latest version.
 
 | Platform | Chip | Format |
 |----------|------|--------|
@@ -42,7 +44,7 @@ Head to [GitHub Releases](https://github.com/hajifish/Local-LLM-Token-Usage-Moni
 Since the app is not signed or notarized by Apple, macOS will block it from running. Open Terminal and run the following command to remove the restriction:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.app
+xattr -dr com.apple.quarantine /Applications/Token\ Usage.app
 ```
 
 > If the app is not in `/Applications`, replace it with the actual path.
@@ -51,12 +53,10 @@ xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.a
 
 Starting with v0.2, the app includes built-in auto-update:
 
-- **When it checks** — once 60 seconds after launch, then every 24 hours. You can also trigger it from the tray menu ("Check for Updates") or from the Settings page.
+- **When it checks** — once 60 seconds after launch, then every hour. You can also click "Check for Updates" in the tray menu, or use the update banner at the top of the main window.
 - **What it checks** — the latest published release on GitHub Releases (draft releases are not visible publicly, so publishing the draft acts as the distribution gate). You are not bothered when you are already up to date.
 - **Download and install** — when a new version is found, you can download, install, and restart entirely in-app; no manual installer download required.
 - **Signature verification** — update packages are signed with minisign and verified against the public key embedded in the app. A package that fails verification is discarded.
-- **Skip a version** — you can skip a specific version so it no longer prompts; undo it later under Settings → About & Updates.
-- **Turn off auto-check** — auto-check can be disabled under Settings → About & Updates; manual checks remain available.
 - **macOS permission prompt** — replacing the app in `/Applications` requires administrator rights, so macOS may ask for your password during installation. This is expected.
 - **Getting the capability for the first time** — versions before v0.2 have no update module, so you need to install v0.2 or later manually once. After that, updates happen in-app.
 
@@ -133,8 +133,8 @@ Application logs are written by tauri-plugin-log to the system log directory:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop.git
-cd Local-LLM-Token-Usage-Monitor-Desktop
+git clone https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop.git
+cd LLM-Token-Usage-Monitor-Desktop
 
 # 2. Install frontend dependencies
 npm install
@@ -161,9 +161,9 @@ Built artifacts will be located in `src-tauri/target/release/bundle/`.
 
 ### Versioning and Release Mechanics
 
-- The static version numbers in the repo (package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json) exist **only for local development builds** and are not hand-aligned with every release. The real version is derived at build time by the release pipeline from the total count of `v*` tags (`0.(2+COUNT/256).(COUNT%256)`), monotonically increasing (the in-app updater compares semver).
-- Every push to master makes auto-tag create a date tag (`vYYYY.MM.DD.N`, bookkeeping only). **Release builds must be dispatched manually** (`gh workflow run release.yml --ref <tag>`); artifacts land in a draft Release, and publishing the draft is the update distribution gate. Perceivable versions therefore only advance on actual releases — effectively a release counter.
-- CI has a version consistency guard: the 5 static version fields must match each other (internal consistency only — not required to match the latest release); otherwise the PR build fails.
+- The version number equals the release tag, in the format `vX.Y.Z`. During the release build, release.yml takes `${tag#v}` and writes it into the 5 manifests; the version sequence is chosen manually and only increases (the in-app updater compares semver).
+- Release flow: merge develop → master → manually `git tag vX.Y.Z && git push origin vX.Y.Z` → the tag push triggers release.yml → wait for the draft Release build → publish manually. Only after publishing does `releases/latest/download/latest.json` become publicly visible; the draft release is the distribution gate.
+- The static version numbers in the repo (package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json) exist **only for local development builds** and are not hand-aligned with every release. CI has a version consistency guard: these 5 fields must match each other (internal consistency only — not required to match the latest release); otherwise the build fails.
 
 ### Contributing
 
@@ -194,11 +194,15 @@ Issues and Pull Requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 │   │   │   ├── anthropic.rs    # Anthropic
 │   │   │   ├── codex.rs        # Codex (ChatGPT, CLI credentials)
 │   │   │   ├── claude_code.rs  # Claude Code (CLI credentials)
-│   │   │   └── kimi_code.rs    # Kimi Code (CLI credentials)
+│   │   │   ├── kimi_code.rs    # Kimi Code (CLI credentials)
+│   │   │   └── qoder.rs        # Qoder (local client credentials / PAT)
 │   │   ├── commands.rs         # Tauri command handlers
 │   │   ├── config.rs           # Configuration management
+│   │   ├── menu_align.rs       # Tray menu value right-alignment (macOS)
 │   │   ├── models.rs           # Data models
+│   │   ├── notification.rs     # Low-balance system notifications
 │   │   ├── scheduler.rs        # Background polling scheduler
+│   │   ├── secrets.rs          # Configuration encryption envelope (XChaCha20-Poly1305)
 │   │   ├── tray.rs             # System tray
 │   │   └── updater.rs          # In-app auto-update
 │   └── Cargo.toml

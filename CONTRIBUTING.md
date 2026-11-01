@@ -1,4 +1,4 @@
-# 为 Local LLM Token Usage Monitor 贡献代码
+# 为 Token Usage 贡献代码
 
 感谢您对本项目的关注！本文档为贡献者提供指南和相关信息。
 
@@ -17,7 +17,7 @@
 
 ## 如何报告 Bug
 
-Bug 通过 [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues) 进行跟踪。
+Bug 通过 [GitHub Issues](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues) 进行跟踪。
 
 创建 Issue 前，请：
 
@@ -39,7 +39,7 @@ Bug 通过 [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Mon
 
 我们欢迎功能建议！提议新功能请：
 
-1. 在 [GitHub Issue](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues/new) 中使用 `enhancement` 标签
+1. 在 [GitHub Issue](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues/new) 中使用 `enhancement` 标签
 2. 清晰描述该功能，并说明它解决的问题
 3. 考虑它如何融入项目范围（轻量级 LLM 用量监控）
 4. 如适用，提供模拟图或示例
@@ -59,8 +59,8 @@ Bug 通过 [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Mon
 1. **Fork 仓库**：在 GitHub 上 Fork 本项目
 2. **克隆到本地**：
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Local-LLM-Token-Usage-Monitor-Desktop.git
-   cd Local-LLM-Token-Usage-Monitor-Desktop
+   git clone https://github.com/YOUR_USERNAME/LLM-Token-Usage-Monitor-Desktop.git
+   cd LLM-Token-Usage-Monitor-Desktop
    ```
 3. **创建分支**：
    ```bash
@@ -195,6 +195,6 @@ npx tsc --noEmit
 
 ## 有问题？
 
-如对贡献有任何疑问，欢迎发起 [GitHub Discussion](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/discussions) 或在 Issue 中提问。
+如对贡献有任何疑问，欢迎发起 [GitHub Discussion](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/discussions) 或在 Issue 中提问。
 
-感谢您为 Local LLM Token Usage Monitor 做出的贡献！
+感谢您为 Token Usage 做出的贡献！

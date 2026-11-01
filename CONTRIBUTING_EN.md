@@ -1,4 +1,4 @@
-# Contributing to Local LLM Token Usage Monitor
+# Contributing to Token Usage
 
 Thank you for your interest in contributing! This document provides guidelines and information for contributors.
 
@@ -17,7 +17,7 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ## How to Report Bugs
 
-Bugs are tracked as [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues).
+Bugs are tracked as [GitHub Issues](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues).
 
 Before creating an issue, please:
 
@@ -39,7 +39,7 @@ When submitting a bug report, include:
 
 We welcome feature suggestions! To propose a new feature:
 
-1. Open a [GitHub Issue](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues/new) with the `enhancement` label
+1. Open a [GitHub Issue](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues/new) with the `enhancement` label
 2. Describe the feature clearly and explain the problem it solves
 3. Consider how it fits within the project's scope (lightweight LLM usage monitoring)
 4. If applicable, provide mockups or examples of how it might work
@@ -59,8 +59,8 @@ Before suggesting a feature, please check if there's already an issue or discuss
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Local-LLM-Token-Usage-Monitor-Desktop.git
-   cd Local-LLM-Token-Usage-Monitor-Desktop
+   git clone https://github.com/YOUR_USERNAME/LLM-Token-Usage-Monitor-Desktop.git
+   cd LLM-Token-Usage-Monitor-Desktop
    ```
 3. **Create a branch** for your changes:
    ```bash
@@ -195,6 +195,6 @@ Examples:
 
 ## Questions?
 
-If you have questions about contributing, feel free to open a [GitHub Discussion](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/discussions) or ask in an issue.
+If you have questions about contributing, feel free to open a [GitHub Discussion](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/discussions) or ask in an issue.
 
-Thank you for helping improve Local LLM Token Usage Monitor!
+Thank you for helping improve Token Usage!

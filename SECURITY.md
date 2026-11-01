@@ -2,13 +2,13 @@
 
 ## 报告安全漏洞
 
-我们高度重视 Local LLM Token Usage Monitor 的安全性。如果您发现了安全漏洞，感谢您进行负责任的披露。
+我们高度重视 Token Usage 的安全性。如果您发现了安全漏洞，感谢您进行负责任的披露。
 
 ### 如何报告
 
-**首选方式：** 请通过 [GitHub 私有漏洞报告](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/security/advisories/new) 进行私密报告。
+**首选方式：** 请通过 [GitHub 私有漏洞报告](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/security/advisories/new) 进行私密报告。
 
-**备选方式：** 您也可以通过 [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues) 联系我们。如果漏洞内容较为敏感，请在公开披露前通过 GitHub 个人主页联系维护者 **hajifish**。
+**备选方式：** 您也可以通过 [GitHub Issues](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues) 联系我们。如果漏洞内容较为敏感，请在公开披露前通过 GitHub 个人主页联系维护者 **hajifish**。
 
 ### 报告内容
 

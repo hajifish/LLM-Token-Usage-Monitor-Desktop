@@ -2,13 +2,13 @@
 
 ## Reporting a Vulnerability
 
-We take the security of Local LLM Token Usage Monitor seriously. If you discover a security vulnerability, we appreciate your responsible disclosure.
+We take the security of Token Usage seriously. If you discover a security vulnerability, we appreciate your responsible disclosure.
 
 ### How to Report
 
-**Preferred method:** Please use [GitHub Private Vulnerability Reporting](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/security/advisories/new) to report vulnerabilities privately.
+**Preferred method:** Please use [GitHub Private Vulnerability Reporting](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/security/advisories/new) to report vulnerabilities privately.
 
-**Alternative:** You can also reach out via [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues). If the vulnerability is sensitive, please email the maintainer at **hajifish** (via GitHub profile contact) before publicly disclosing.
+**Alternative:** You can also reach out via [GitHub Issues](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues). If the vulnerability is sensitive, please email the maintainer at **hajifish** (via GitHub profile contact) before publicly disclosing.
 
 ### What to Include
 

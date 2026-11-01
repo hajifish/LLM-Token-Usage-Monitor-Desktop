@@ -36,7 +36,7 @@
 
 ## 执行
 
-如发现辱骂、骚扰或其他不可接受的行为，请通过 [GitHub Issues](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/issues) 联系负责执行的社区组织者，或通过 [GitHub 个人主页](https://github.com/hajifish) 联系维护者 **hajifish**。所有投诉都将得到及时、公正的审查和调查。
+如发现辱骂、骚扰或其他不可接受的行为，请通过 [GitHub Issues](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/issues) 联系负责执行的社区组织者，或通过 [GitHub 个人主页](https://github.com/hajifish) 联系维护者 **hajifish**。所有投诉都将得到及时、公正的审查和调查。
 
 所有社区组织者都有义务尊重报告者的隐私和安全。
 

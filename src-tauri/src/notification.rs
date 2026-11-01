@@ -11,7 +11,7 @@
 //! 避免网络抖动造成「假恢复 → 再恶化」的重复提醒。
 
 use crate::models::{ProviderStatus, UsageSummary};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
@@ -56,7 +56,9 @@ pub(crate) fn progress_text(p: &ProviderStatus) -> String {
 }
 
 /// 供应商判定键：name + alias（scheduler 的 alias 已回退统一显示名）。
-/// 同类型多账号（alias 不同）由此独立判定，与前端 providerKey 同口径。
+/// 同类型多账号须 alias 唯一：不填别名时两账号回退同一显示名 → 键碰撞，
+/// 仅首个出现的供应商参与判定，后续同键跳过（不发事件、不覆盖基线），
+/// 与前端 providerKey 的「targets.length !== 1 即拒绝执行」保守取向一致。
 fn provider_key(p: &ProviderStatus) -> String {
     format!("{}|{}", p.name, p.alias)
 }
@@ -76,12 +78,18 @@ pub(crate) fn detect_alert_transitions(
 ) -> (Vec<AlertEvent>, HashMap<String, u8>) {
     let mut next = prev.clone();
     let mut events = Vec::new();
+    // 同类型多账号不填别名时 provider_key 碰撞：仅首个参与判定，后续同键跳过
+    // （否则后遍历者覆盖前者基线，前者耗尽告警被永久吞掉）
+    let mut seen = HashSet::new();
     for p in &summary.providers {
         if p.balance.is_none() {
             continue;
         }
         let level = crate::tray::quota_warning_level(p);
         let key = provider_key(p);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
         let event = transition_notification(prev.get(&key).copied(), level).map(|level| {
             let display_name = p.alias.clone();
             let progress = progress_text(p);
@@ -263,6 +271,46 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(next.get("DeepSeek|工作号"), Some(&2u8));
         assert_eq!(next.get("DeepSeek|私人号"), Some(&1u8));
+    }
+
+    #[test]
+    fn duplicate_provider_keys_only_first_is_judged() {
+        // 同类型两账号均不填别名 → provider_key 碰撞：仅首个参与判定
+        // （后续同键跳过：不发事件、不覆盖基线，基线取首个账号）
+        let prev = HashMap::from([("DeepSeek|DeepSeek".to_string(), 0u8)]);
+        let s = summary(vec![
+            status("DeepSeek", "DeepSeek", Some(balance(50.0, "CNY"))), // 首个：正常
+            status("DeepSeek", "DeepSeek", Some(balance(0.0, "CNY"))),  // 同键：耗尽，被跳过
+        ]);
+        let (events, next) = detect_alert_transitions(&prev, &s);
+        assert!(
+            events.is_empty(),
+            "同键碰撞时后续账号不应产生通知（否则基线被互覆、告警被吞）"
+        );
+        assert_eq!(
+            next.get("DeepSeek|DeepSeek"),
+            Some(&0u8),
+            "基线应取首个账号"
+        );
+    }
+
+    #[test]
+    fn duplicate_key_holder_escalates_next_round() {
+        // 碰撞轮基线归首个账号持有：下轮首个恶化 → 正常发出
+        let prev = HashMap::from([("DeepSeek|DeepSeek".to_string(), 0u8)]);
+        let s = summary(vec![
+            status("DeepSeek", "DeepSeek", Some(balance(50.0, "CNY"))),
+            status("DeepSeek", "DeepSeek", Some(balance(0.0, "CNY"))),
+        ]);
+        let (_, next) = detect_alert_transitions(&prev, &s);
+        let worsened = summary(vec![status(
+            "DeepSeek",
+            "DeepSeek",
+            Some(balance(5.0, "CNY")),
+        )]);
+        let (events, _) = detect_alert_transitions(&next, &worsened);
+        assert_eq!(events.len(), 1, "键持有者下轮恶化应正常发出");
+        assert_eq!(events[0].level, 1);
     }
 
     #[test]

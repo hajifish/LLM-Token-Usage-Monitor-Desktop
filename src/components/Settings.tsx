@@ -207,7 +207,10 @@ function Settings({ onBack }: SettingsProps) {
       await invoke('save_config', { newConfig: fresh });
       setConfig((cur) => (cur ? { ...cur, notifications_enabled: value } : cur));
     } catch (e) {
-      // 失败不静默：走 toast 通道；本地状态不翻转，受控 checkbox 回弹到真实值
+      // 失败不静默：走 toast 通道。受控 checkbox 回弹的主因是 React 18 受控组件
+      // restore 机制——react-dom 在 change 事件收尾无条件把 DOM checked 写回已提交
+      // state 值（已核 react-dom 18.3 源码验证回弹 100% 成立），本地状态未翻转即回弹；
+      // catch 里的 setConfig((c) => ({ ...c })) 只是冗余防御（触发一次重渲染兜底），勿误删或误信它是关键
       setMessage(`通知设置保存失败: ${e}`);
       setConfig((c) => (c ? { ...c } : c));
     } finally {

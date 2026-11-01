@@ -36,7 +36,11 @@ pub fn transition_notification(prev: Option<u8>, current: u8) -> Option<u8> {
 }
 
 /// 通知文案（纯函数，按等级分级）：返回 (标题, 正文)。
-/// 1=紧张（黄）用 ⚠️，2=耗尽（红）用 🚨，与托盘菜单的告警后缀同风格。
+/// 1=紧张（黄）用 ⚠️，2=耗尽（红）用 🚨——与托盘 ⚠️ 前缀同风格，耗尽档用 🚨 加强
+/// （托盘不分级，红黄区分靠图标圆点）。
+///
+/// 注意：对 level 的 match 以 `_` 兜底为紧张档——未来新增等级 3 时会**静默**按
+/// 紧张档渲染而非编译期暴露，届时需与 tray.rs 的显示前缀人工联动调整。
 pub(crate) fn notification_text(level: u8, display_name: &str, progress: &str) -> (String, String) {
     match level {
         2 => (
@@ -50,8 +54,10 @@ pub(crate) fn notification_text(level: u8, display_name: &str, progress: &str) -
     }
 }
 
-/// 进度文案（与菜单状态条同源）：percent 型取主窗口剩余%，API 型按币种余额，
-/// 无数据为「–」。
+/// 进度文案（与菜单状态条同源）：percent 型取主窗口剩余%（无 quota 时
+/// [`crate::tray::aggregate_value`] 回退 balance），API 型按币种余额。
+/// 「无数据为 –」分支在通知链路不可达——balance 为 None 的供应商在
+/// [`detect_alert_transitions`] 已被 continue 跳过；该兜底仅供托盘侧与测试复用。
 pub(crate) fn progress_text(p: &ProviderStatus) -> String {
     match &p.balance {
         Some(b) if b.is_percent() => format!("{:.0}%", crate::tray::aggregate_value(p)),

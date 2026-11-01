@@ -56,6 +56,10 @@ pub(crate) async fn persist_config(
     health_state: &Arc<RwLock<ConfigHealth>>,
     new_config: AppConfig,
 ) -> Result<(), String> {
+    // 身份键唯一是托盘开关（tray::provider_show_in_tray）与低余额通知定位的前提：
+    // 撞键时只有首个账号生效，其余静默失效，故在落盘咽喉拒绝（含遗留退化配置，
+    // 拒绝文案指引用户补别名）。见 models::provider_identity 的口径说明。
+    crate::models::validate_provider_identities(&new_config)?;
     // 读取本次会话的加载健康状态：unreadable 为真时，config::save 会在覆盖前先备份原密文，
     // 避免用户随手一次保存就永久销毁本机无法解密的全部密钥。
     // 已备份过（backup_path 非空）则不再重复备份：此时磁盘上已是本次会话新写入的可读信封，

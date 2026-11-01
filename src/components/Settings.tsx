@@ -21,7 +21,9 @@ const PROVIDER_OPTIONS = [
   { value: 'Qoder', label: 'Qoder' },
 ];
 
-/** 无需用户配置 API Key，凭证从本机 CLI / 桌面客户端自动读取的供应商类型。 */
+/** 无需用户配置 API Key，凭证从本机 CLI / 桌面客户端自动读取的供应商类型。
+ *  与 Rust needs_api_key 名单同口径；Qoder 虽属免密默认，但其 PAT 兜底入口
+ *  在下方渲染分支特例放行（所有平台可填、可清空）。 */
 const KEYLESS_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
 
 /**
@@ -176,7 +178,14 @@ function Settings({ onBack }: SettingsProps) {
         const key = providerKey(local);
         const targets = fresh.providers.filter((fp) => providerKey(fp) === key);
         if (targets.length !== 1) {
-          setMessage('配置已变化，请重新打开设置页');
+          // 先排查本页配置自身的身份键撞车（同类型无别名双账号）：这类配置后端落盘
+          // 同样会拒绝（models::validate_provider_identities），提示补别名而非误报「配置已变化」
+          const localCount = config.providers.filter((fp) => providerKey(fp) === key).length;
+          setMessage(
+            localCount > 1
+              ? '同类型账号需填写不同别名后才能单独控制显示'
+              : '配置已变化，请重新打开设置页',
+          );
           return;
         }
         targets[0].show_in_tray = patch.value;
@@ -518,30 +527,42 @@ function Settings({ onBack }: SettingsProps) {
                   value={p.alias || ''}
                   onChange={(e) => updateProvider(i, 'alias', e.target.value)}
                 />
-                {KEYLESS_PROVIDERS.has(p.name) && (p.name !== 'Qoder' || IS_MAC) ? (
+                {p.name === 'Qoder' ? (
+                  // Qoder 双认证路径（qoder.rs）：api_key 留空 = 本机客户端凭据（主路径），
+                  // 填写 PAT = 令牌兜底。所有平台都放行 PAT 输入：macOS 上客户端未登录或
+                  // 钥匙串授权被拒时兜底仍可用，已存的失效 PAT 也能在此清空并保存恢复主路径
+                  <>
+                    <input
+                      type="password"
+                      placeholder={
+                        IS_MAC
+                          ? 'PAT 个人访问令牌（可选，留空自动读取客户端凭据）'
+                          : 'PAT 个人访问令牌'
+                      }
+                      value={p.api_key}
+                      onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
+                    />
+                    <span className="ds-hint">
+                      {IS_MAC
+                        ? '留空自动读取本机 Qoder / Qoder CN 客户端登录凭据（需已登录，首次弹窗请点允许）；读取失败可改填 PAT，清空并保存即恢复自动读取'
+                        : '本地凭据读取暂仅支持 macOS，请填写 PAT 作为凭据来源'}
+                    </span>
+                  </>
+                ) : KEYLESS_PROVIDERS.has(p.name) ? (
                   <span className="ds-hint">
                     {p.name === 'Codex'
                       ? '自动从 ~/.codex/auth.json 读取凭证'
                       : p.name === 'Claude Code'
                         ? '自动从 ~/.claude/credentials.json 读取凭证'
-                        : p.name === 'Qoder'
-                          ? '自动读取本机 Qoder / Qoder CN 客户端登录凭据（需已登录，首次弹窗请点允许）'
-                          : '自动从 ~/.kimi-code/config.toml 读取凭证'}
+                        : '自动从 ~/.kimi-code/config.toml 读取凭证'}
                   </span>
                 ) : (
-                  <>
-                    <input
-                      type="password"
-                      placeholder="API Key"
-                      value={p.api_key}
-                      onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
-                    />
-                    {p.name === 'Qoder' && (
-                      <span className="ds-hint">
-                        本地凭据读取暂仅支持 macOS，可填写 PAT 作为凭据来源
-                      </span>
-                    )}
-                  </>
+                  <input
+                    type="password"
+                    placeholder="API Key"
+                    value={p.api_key}
+                    onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
+                  />
                 )}
                 {(p.name === 'OpenAI' || p.name === 'Anthropic') && (
                   <span className="ds-hint">需组织管理员密钥（Admin Key）</span>

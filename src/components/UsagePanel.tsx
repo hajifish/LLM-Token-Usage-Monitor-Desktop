@@ -215,8 +215,9 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
   return (
     <div className={`usage-panel${refreshing ? ' is-refreshing' : ''}`}>
       <div className="card-grid">
-        {visibleProviders.map((p) => (
-          <ProviderCard key={`${p.name}-${p.alias}`} p={p} />
+        {visibleProviders.map((p, i) => (
+          // alias 无自定义时回退显示名，同类型无别名双账号会重键；追加下标兜底
+          <ProviderCard key={`${p.name}-${p.alias}-${i}`} p={p} />
         ))}
       </div>
     </div>

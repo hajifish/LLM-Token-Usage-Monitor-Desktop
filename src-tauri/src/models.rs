@@ -142,6 +142,37 @@ pub struct UsageSummary {
     pub last_updated: String,
 }
 
+/// 供应商配置行的身份键：name + trim 后别名（空回退统一显示名）。
+///
+/// 与 `tray::provider_show_in_tray` 的匹配口径一致（含空别名回退 display_name、
+/// 两侧 trim）：低余额通知的 provider_key 判定同口径。键撞车时这两处都只能
+/// 命中首个账号——第二个账号的托盘开关与告警静默失效，故配置落盘前由
+/// [`validate_provider_identities`] 保证该键全局唯一。
+pub(crate) fn provider_identity(c: &ProviderConfig) -> (String, String) {
+    let alias = c
+        .alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .unwrap_or_else(|| crate::providers::display_name(&c.name));
+    (c.name.clone(), alias.to_string())
+}
+
+/// 校验供应商身份键唯一：重复即拒绝。落盘咽喉（commands::persist_config）调用，
+/// 错误文案直接面向设置页 toast，须指引用户填写别名。
+pub(crate) fn validate_provider_identities(config: &AppConfig) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for c in &config.providers {
+        if !seen.insert(provider_identity(c)) {
+            return Err(format!(
+                "「{}」存在多个同名账号且未用别名区分，请为每个账号填写不同别名后再保存",
+                crate::providers::display_name(&c.name)
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod quota_reset_at_tests {
     use super::*;
@@ -171,5 +202,77 @@ mod notifications_default_tests {
             cfg.notifications_enabled,
             "缺省的 notifications_enabled 应默认为 true"
         );
+    }
+}
+
+#[cfg(test)]
+mod provider_identity_tests {
+    use super::*;
+
+    fn provider(name: &str, alias: Option<&str>) -> ProviderConfig {
+        ProviderConfig {
+            name: name.to_string(),
+            api_key: String::new(),
+            enabled: true,
+            platform_token: None,
+            alias: alias.map(str::to_string),
+            show_in_tray: true,
+        }
+    }
+
+    fn config(providers: Vec<ProviderConfig>) -> AppConfig {
+        AppConfig {
+            providers,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn duplicate_type_without_alias_rejected() {
+        // 两个 DeepSeek 都不填别名 → 身份键撞车，保存必须被拒绝
+        let cfg = config(vec![provider("DeepSeek", None), provider("DeepSeek", None)]);
+        let err = validate_provider_identities(&cfg).unwrap_err();
+        assert!(err.contains("别名"), "错误文案应指引用户填写别名: {err}");
+    }
+
+    #[test]
+    fn duplicate_type_distinct_alias_allowed() {
+        // 填了不同别名即为合法多账号配置
+        let cfg = config(vec![
+            provider("DeepSeek", Some("个人")),
+            provider("DeepSeek", Some("公司")),
+        ]);
+        assert!(validate_provider_identities(&cfg).is_ok());
+    }
+
+    #[test]
+    fn alias_matching_default_display_name_still_collides() {
+        // 一个显式填「智谱」（= Zhipu 默认显示名）、一个留空：运行时两侧匹配键
+        // 同为「智谱」（tray::provider_show_in_tray 口径），仍属撞车
+        let cfg = config(vec![
+            provider("Zhipu", Some("智谱")),
+            provider("Zhipu", None),
+        ]);
+        assert!(validate_provider_identities(&cfg).is_err());
+    }
+
+    #[test]
+    fn whitespace_only_alias_treated_as_empty() {
+        // 纯空白别名按空处理（与匹配键的 trim 语义一致），与留空账号仍撞车
+        let cfg = config(vec![
+            provider("DeepSeek", Some("   ")),
+            provider("DeepSeek", None),
+        ]);
+        assert!(validate_provider_identities(&cfg).is_err());
+    }
+
+    #[test]
+    fn same_alias_different_types_allowed() {
+        // 身份键含 name：不同类型账号共用同一别名不冲突
+        let cfg = config(vec![
+            provider("DeepSeek", Some("主号")),
+            provider("Kimi API", Some("主号")),
+        ]);
+        assert!(validate_provider_identities(&cfg).is_ok());
     }
 }

@@ -6,6 +6,7 @@ pub mod deepseek;
 pub mod kimi;
 pub mod kimi_code;
 pub mod openai;
+pub mod qoder;
 pub mod zhipu;
 
 use crate::models::{BalanceData, QuotaInfo, UsageData};
@@ -25,6 +26,7 @@ pub const ALL_PROVIDER_TYPES: &[&str] = &[
     "Kimi API",
     "Kimi Code",
     "Zhipu",
+    "Qoder",
 ];
 
 /// 供应商类型统一显示名（UI 全系统展示口径；内部类型名是配置键/工厂键，不变）。
@@ -85,6 +87,7 @@ pub fn create_provider(
         "Codex" => Some(Box::new(codex::CodexProvider::new())),
         "Claude Code" => Some(Box::new(claude_code::ClaudeCodeProvider::new())),
         "Kimi Code" => Some(Box::new(kimi_code::KimiCodeProvider::new())),
+        "Qoder" => Some(Box::new(qoder::QoderProvider::new(api_key))),
         _ => None,
     }
 }
@@ -190,6 +193,23 @@ pub(crate) fn append_query_param(base_url: &str, key: &str, value: &str) -> Stri
     }
 }
 
+/// 将 ISO 8601 时间字符串转换为紧凑倒计时（12M / 1H4M / 6D，与展示层同格式）。
+/// Kimi Code / Qoder 等订阅型供应商的 reset_at 文本回退共用。
+pub(crate) fn format_iso_reset(iso: &str) -> String {
+    use chrono::{DateTime, Utc};
+    match iso.parse::<DateTime<Utc>>() {
+        Ok(dt) => {
+            let duration = dt.signed_duration_since(Utc::now());
+            if duration > chrono::Duration::zero() {
+                crate::tray::countdown_compact(duration)
+            } else {
+                "0M".to_string()
+            }
+        }
+        Err(_) => iso.to_string(),
+    }
+}
+
 /// 测试共享工具：消除 mod.rs / openai.rs / anthropic.rs 三处重复的 val() 定义。
 #[cfg(test)]
 pub(crate) mod test_util {
@@ -215,6 +235,7 @@ mod tests {
             ("Kimi API", "Kimi API"),
             ("Kimi Code", "Kimi Code"),
             ("Zhipu", "智谱"),
+            ("Qoder", "Qoder"),
         ];
         for (internal, display) in expected {
             assert_eq!(

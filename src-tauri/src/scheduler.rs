@@ -38,6 +38,7 @@ fn provider_logo(name: &str) -> Option<&'static [u8]> {
         "DeepSeek" => include_bytes!("../icons/providers/deepseek.png"),
         "OpenAI" => include_bytes!("../icons/providers/openai.png"),
         "Anthropic" => include_bytes!("../icons/providers/anthropic.png"),
+        "Qoder" => include_bytes!("../icons/providers/qoder.png"),
         _ => return None,
     };
     Some(bytes)
@@ -59,9 +60,45 @@ fn alert_suffix(p: &ProviderStatus) -> &'static str {
 }
 
 /// 一个供应商的托盘菜单块：标题行 + 明细行（全部配额窗口平铺，不折叠）
+///
+/// 标题两态显式化：`title` 为构造时冻结的原始 `名称 — 值`（不可变），
+/// 右对齐结果写入 `aligned_title`，展示时经 [`Self::display_title`] 取值——
+/// 「原始 / 已对齐」不再靠原地覆写丢失原始态。
 pub(crate) struct ProviderMenuBlock {
-    pub title: String,
+    /// 原始标题 `名称 — 值`（构造后不可变；测量不可用 / 有明细子项时即展示态）
+    title: String,
+    /// 右对齐覆写后的标题；`None` = 保持原始 title（有明细子项或测量不可用）
+    aligned_title: Option<String>,
     pub details: Vec<String>,
+    /// 标题拆分（名称 / 值），仅无明细子项的块用于右对齐补空白。
+    /// 调用链整体在 macOS 门内（Linux CI 构建 lib 目标无调用点，测试使用不算数）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    name: String,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    value: String,
+}
+
+impl ProviderMenuBlock {
+    fn new(name: String, value: String, details: Vec<String>) -> Self {
+        Self {
+            title: format!("{name} — {value}"),
+            aligned_title: None,
+            details,
+            name,
+            value,
+        }
+    }
+
+    /// 展示标题：对齐结果优先，未对齐时回落原始 `名称 — 值`。
+    pub(crate) fn display_title(&self) -> &str {
+        self.aligned_title.as_deref().unwrap_or(&self.title)
+    }
+
+    /// 右对齐覆写（仅无明细子项的块会被对齐路径调用；调用链在 macOS 门内）。
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn set_aligned_title(&mut self, title: String) {
+        self.aligned_title = Some(title);
+    }
 }
 
 /// 明细行缩进（NSMenu 同级项无层级，用文本缩进模拟从属关系）
@@ -142,6 +179,16 @@ fn usage_line(u: &UsageData) -> Option<String> {
     }
 }
 
+/// 免 API Key 的供应商名单（凭证从 CLI/客户端配置读取）。
+/// 与前端 `KEYLESS_PROVIDERS`（Settings.tsx）双处维护：后端漏加时免密供应商
+/// 空 key 用户每轮静默「无数据」，故名单由测试锁定（tests::needs_api_key_list）。
+fn needs_api_key(provider_name: &str) -> bool {
+    !matches!(
+        provider_name,
+        "Codex" | "Claude Code" | "Kimi Code" | "Qoder"
+    )
+}
+
 /// 供应商 → 菜单块。percent 型消费 quota_infos（标题主指标取主窗口 remaining_percent，
 /// 全部窗口平铺为明细行、保持接口返回顺序）；API 型标题为余额、有 usage 时加今日明细行
 fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBlock {
@@ -154,34 +201,163 @@ fn provider_menu_block(p: &ProviderStatus, now: DateTime<Utc>) -> ProviderMenuBl
 
     if let Some(quotas) = percent_quota {
         if let Some(primary) = crate::tray::primary_quota(quotas) {
-            return ProviderMenuBlock {
-                title: format!("{} — {:.0}%{}", p.alias, primary.remaining_percent, suffix),
-                details: quotas.iter().map(|q| quota_line(q, now)).collect(),
-            };
+            return ProviderMenuBlock::new(
+                p.alias.clone(),
+                format!("{:.0}%{}", primary.remaining_percent, suffix),
+                quotas.iter().map(|q| quota_line(q, now)).collect(),
+            );
         }
     }
 
     match &p.balance {
-        Some(b) if b.is_percent() => ProviderMenuBlock {
-            title: format!("{} — {:.0}%{}", p.alias, b.available_balance, suffix),
-            details: vec![],
-        },
-        Some(b) if b.is_usd() => ProviderMenuBlock {
-            title: format!("{} — ${:.2}{}", p.alias, b.available_balance, suffix),
-            details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
-        },
-        Some(b) => ProviderMenuBlock {
-            title: format!("{} — ¥{:.2}{}", p.alias, b.available_balance, suffix),
-            details: p.usage.as_ref().and_then(usage_line).into_iter().collect(),
-        },
-        None if p.error.is_some() => ProviderMenuBlock {
-            title: format!("{} — 获取失败{}", p.alias, suffix),
-            details: vec![],
-        },
-        None => ProviderMenuBlock {
-            title: format!("{} — 无数据{}", p.alias, suffix),
-            details: vec![],
-        },
+        Some(b) if b.is_percent() => ProviderMenuBlock::new(
+            p.alias.clone(),
+            format!("{:.0}%{}", b.available_balance, suffix),
+            vec![],
+        ),
+        Some(b) if b.is_usd() => ProviderMenuBlock::new(
+            p.alias.clone(),
+            format!("${:.2}{}", b.available_balance, suffix),
+            p.usage.as_ref().and_then(usage_line).into_iter().collect(),
+        ),
+        Some(b) => ProviderMenuBlock::new(
+            p.alias.clone(),
+            format!("¥{:.2}{}", b.available_balance, suffix),
+            p.usage.as_ref().and_then(usage_line).into_iter().collect(),
+        ),
+        None if p.error.is_some() => {
+            ProviderMenuBlock::new(p.alias.clone(), format!("获取失败{}", suffix), vec![])
+        }
+        None => ProviderMenuBlock::new(p.alias.clone(), format!("无数据{}", suffix), vec![]),
+    }
+}
+
+/// 菜单中带图标的行（NSMenuItem.image 按 18pt 渲染）相对无图标行的标题缩进量。
+/// AppKit 实测：图标列宽 = image 宽 + 5.8；muda 的 IconMenuItem 固定 18pt。
+/// 唯一非测试调用点在下方 `apply_menu_alignment` 的 macOS 门内，
+/// Linux CI 构建 lib 目标会视为 dead code，测试使用不计入（`--all-targets` 分目标编译）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MENU_ICON_INDENT: f64 = 23.8;
+
+/// 无明细子项的供应商标题右对齐：名称 + 空白 + 值，值的右边界与菜单最宽行末尾对齐。
+/// 有子项的块保持 `名称 — 值`（用户指定的现有样式）。
+///
+/// 入参为「块 × 是否带图标」的 zip 产物（长度由构造保证一致，无运行时守卫）；
+/// `text_width` 注入测量函数：生产用系统菜单字体（menu_align），测试用假度量。
+/// 任一测量失败即整体放弃，保持原样。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn align_menu_titles<F>(blocks: Vec<(&mut ProviderMenuBlock, bool)>, text_width: F)
+where
+    F: Fn(&str) -> Option<f64>,
+{
+    // 最宽一行决定右边界；图标行把图标缩进计入整行宽度
+    let mut max_width: f64 = 0.0;
+    for (block, icon) in blocks.iter() {
+        let Some(w) = text_width(block.title.as_str()) else {
+            return;
+        };
+        max_width = max_width.max(w + if *icon { MENU_ICON_INDENT } else { 0.0 });
+        for detail in &block.details {
+            let Some(w) = text_width(detail) else {
+                return;
+            };
+            max_width = max_width.max(w);
+        }
+    }
+    if max_width <= 0.0 {
+        return;
+    }
+
+    // 空白单位宽度：普通空格为主，thin/hair space 收敛余量（误差 < 0.9pt）
+    let (Some(space_w), Some(thin_w), Some(hair_w)) = (
+        text_width(" ").filter(|w| *w > 0.0),
+        text_width("\u{2009}"),
+        text_width("\u{200A}"),
+    ) else {
+        return;
+    };
+
+    for (block, icon) in blocks {
+        if block.details.is_empty() {
+            let target = max_width - if icon { MENU_ICON_INDENT } else { 0.0 };
+            if let Some(title) = pad_title(
+                &block.name,
+                &block.value,
+                target,
+                &text_width,
+                (space_w, thin_w, hair_w),
+            ) {
+                block.set_aligned_title(title);
+            }
+        }
+    }
+}
+
+/// 在名称与值之间插入空白，使整行宽度尽量贴近 `target`（不超出）。
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn pad_title<F>(
+    name: &str,
+    value: &str,
+    target: f64,
+    text_width: &F,
+    (space_w, thin_w, hair_w): (f64, f64, f64),
+) -> Option<String>
+where
+    F: Fn(&str) -> Option<f64>,
+{
+    let base_w = text_width(&format!("{name}{value}"))?;
+    if base_w >= target - 0.05 {
+        // 理论上不会发生（max_width 至少包含带 “ — ” 的标题），保底恢复原样式
+        return Some(format!("{name} — {value}"));
+    }
+
+    let mut n = ((target - base_w) / space_w).floor().max(0.0) as usize;
+    // 用整串宽度复核：空格与相邻字形的字偶会带来亚像素差，宁可少补不可超出
+    while n > 0 && text_width(&format!("{name}{}{value}", " ".repeat(n)))? > target + 0.05 {
+        n -= 1;
+    }
+
+    let mut pad = " ".repeat(n);
+    let mut width = text_width(&format!("{name}{pad}{value}"))?;
+    for (ch, w) in [('\u{2009}', thin_w), ('\u{200A}', hair_w)] {
+        if width + w <= target + 0.05 {
+            pad.push(ch);
+            width += w;
+        }
+    }
+    Some(format!("{name}{pad}{value}"))
+}
+
+/// 生产入口：按供应商是否有 logo 决定图标缩进；无法测量时保持原样式。
+///
+/// has_icon 来源假设：以 `provider_logo` 是否收录推导，与重建路径的图标附加一致；
+/// 但菜单项实际是否带图标还取决于重建处 `Image::from_bytes` 解码成功——解码失败时
+/// 该行无图标、对齐仍按 `MENU_ICON_INDENT` 缩进（解码失败属极端路径，偏差可接受）。
+fn apply_menu_alignment(blocks: &mut [ProviderMenuBlock], providers: &[&ProviderStatus]) {
+    if blocks.is_empty() {
+        return;
+    }
+    if blocks.len() != providers.len() {
+        // 不变量被破坏（菜单块与供应商一一对应）——降级为不对齐，留痕便于定位。
+        log::debug!(
+            "apply_menu_alignment: 长度不匹配（blocks={} providers={}），本轮跳过对齐",
+            blocks.len(),
+            providers.len()
+        );
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let measurer = crate::menu_align::MenuTextMeasurer::new();
+        let pairs: Vec<(&mut ProviderMenuBlock, bool)> = blocks
+            .iter_mut()
+            .zip(providers.iter().map(|p| provider_logo(&p.name).is_some()))
+            .collect();
+        align_menu_titles(pairs, |text| Some(measurer.width(text)));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (blocks, providers);
     }
 }
 
@@ -381,12 +557,10 @@ async fn poll_providers(
             .filter(|a| !a.trim().is_empty())
             .unwrap_or_else(|| providers::display_name(&provider_cfg.name).to_string());
 
-        // Codex / Claude Code / Kimi Code 无需 API Key（凭证从 CLI 配置文件读取），跳过空 key 检查
-        let needs_api_key = !matches!(
-            provider_cfg.name.as_str(),
-            "Codex" | "Claude Code" | "Kimi Code"
-        );
-        if !provider_cfg.enabled || (needs_api_key && provider_cfg.api_key.is_empty()) {
+        // Codex / Claude Code / Kimi Code / Qoder 无需 API Key（凭证从 CLI/客户端配置读取），跳过空 key 检查
+        if !provider_cfg.enabled
+            || (needs_api_key(&provider_cfg.name) && provider_cfg.api_key.is_empty())
+        {
             provider_statuses.push(ProviderStatus {
                 name: provider_cfg.name.clone(),
                 alias: display_alias,
@@ -551,9 +725,19 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             if let Some(handles) = inner.as_mut() {
                 if handles.signature == signature {
                     let now = Utc::now();
-                    for (block, p) in handles.provider_blocks.iter().zip(summary.providers.iter()) {
-                        let b = provider_menu_block(p, now);
-                        let _ = block.title.set_text(b.title);
+                    // 先整体生成再对齐：无明细行的标题要做右对齐，目标列取决于所有行
+                    let providers: Vec<&ProviderStatus> = summary
+                        .providers
+                        .iter()
+                        .take(handles.provider_blocks.len())
+                        .collect();
+                    let mut blocks: Vec<ProviderMenuBlock> = providers
+                        .iter()
+                        .map(|p| provider_menu_block(p, now))
+                        .collect();
+                    apply_menu_alignment(&mut blocks, &providers);
+                    for (block, b) in handles.provider_blocks.iter().zip(blocks.iter()) {
+                        let _ = block.title.set_text(b.display_title());
                         for (item, text) in block.details.iter().zip(b.details.iter()) {
                             let _ = item.set_text(text);
                         }
@@ -589,19 +773,25 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         //    enabled 展示行点击无动作（id 无 on_menu_event 匹配），代价仅是点击后菜单收起。
         const MAX_PROVIDER_BLOCKS: usize = 50;
         let now = Utc::now();
-        let mut provider_blocks = Vec::new();
-        for (i, p) in summary
-            .providers
+        let providers: Vec<&ProviderStatus> =
+            summary.providers.iter().take(MAX_PROVIDER_BLOCKS).collect();
+        let mut blocks: Vec<ProviderMenuBlock> = providers
             .iter()
-            .take(MAX_PROVIDER_BLOCKS)
-            .enumerate()
-        {
-            let block = provider_menu_block(p, now);
+            .map(|p| provider_menu_block(p, now))
+            .collect();
+        apply_menu_alignment(&mut blocks, &providers);
+
+        let mut provider_blocks = Vec::new();
+        for (i, (p, block)) in providers.iter().zip(blocks.iter()).enumerate() {
             // 标题行用 IconMenuItem：供应商官方 logo 作为条目图标（NSMenuItem.setImage，
             // 18pt 渲染）；未收录类型无图标。logo 跟随供应商名（签名含 name），
             // 结构不变时无需 set_icon，仅原地 set_text 刷新文案。
+            // 注意：对齐侧 has_icon 只按 provider_logo 是否收录推导（见
+            // apply_menu_alignment），此处 Image::from_bytes 解码失败时该行实际
+            // 无图标、但对齐仍按 23.8pt 缩进（来源假设，极端路径偏差可接受）。
             let mut title_builder =
-                IconMenuItemBuilder::with_id(format!("p{i}_title"), &block.title).enabled(true);
+                IconMenuItemBuilder::with_id(format!("p{i}_title"), block.display_title())
+                    .enabled(true);
             if let Some(logo) = provider_logo(&p.name) {
                 if let Ok(img) = tauri::image::Image::from_bytes(logo) {
                     title_builder = title_builder.icon(img);
@@ -966,7 +1156,7 @@ mod tests {
     // ---------- provider_logo ----------
 
     #[test]
-    fn provider_logo_maps_eight_known_types() {
+    fn provider_logo_maps_known_types() {
         for name in [
             "Claude Code",
             "Codex",
@@ -976,10 +1166,33 @@ mod tests {
             "DeepSeek",
             "OpenAI",
             "Anthropic",
+            "Qoder",
         ] {
             assert!(provider_logo(name).is_some(), "{name} 应有 logo");
         }
         assert!(provider_logo("Unknown").is_none());
+    }
+
+    // ---------- needs_api_key ----------
+
+    #[test]
+    fn needs_api_key_list_locked() {
+        // 后端豁免名单与前端 KEYLESS_PROVIDERS（Settings.tsx）双处维护、无跨端
+        // 守护：后端漏加时免密供应商空 key 用户每轮静默「无数据」。本测试锁定
+        // 后端名单——增删供应商必须显式改这里（前端侧无测试设施，见 issue #100）。
+        for name in ["Codex", "Claude Code", "Kimi Code", "Qoder"] {
+            assert!(!needs_api_key(name), "{name} 应免 API Key");
+        }
+        for name in [
+            "DeepSeek",
+            "Zhipu",
+            "Kimi API",
+            "OpenAI",
+            "Anthropic",
+            "UnknownProvider",
+        ] {
+            assert!(needs_api_key(name), "{name} 应要求 API Key");
+        }
     }
 
     // ---------- provider_menu_block ----------
@@ -1038,7 +1251,7 @@ mod tests {
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
         // 标题 = 身份徽章 + 别名 + 主窗口剩余；明细 = 全部窗口平铺（保持接口顺序）
-        assert_eq!(block.title, "Max工作 — 62%");
+        assert_eq!(block.display_title(), "Max工作 — 62%");
         assert_eq!(block.details.len(), 3);
         assert_eq!(block.details[0], "  [■■■■□□□□□□] 5H · 62% · 1H24M");
         assert!(block.details[1].starts_with("  [■"));
@@ -1058,7 +1271,7 @@ mod tests {
         };
         let p = status_full("Zhipu", "智谱", Some(b), None, None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "智谱 — 47%");
+        assert_eq!(block.display_title(), "智谱 — 47%");
         assert!(block.details.is_empty());
     }
 
@@ -1091,7 +1304,7 @@ mod tests {
         ];
         let p = status_full("Zhipu", "智谱", Some(b), Some(quotas), None);
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "智谱 — 35%");
+        assert_eq!(block.display_title(), "智谱 — 35%");
         assert_eq!(block.details.len(), 2);
         assert_eq!(block.details[0], "  [■■■■■■■□□□] 5H · 35%");
         assert!(block.details[1].starts_with("  [■■■■■■■□□□] W"));
@@ -1117,7 +1330,7 @@ mod tests {
         };
         let p = status_full("DeepSeek", "DeepSeek", Some(b), None, Some(u));
         let block = provider_menu_block(&p, fixed_now());
-        assert_eq!(block.title, "DeepSeek — ¥88.88");
+        assert_eq!(block.display_title(), "DeepSeek — ¥88.88");
         assert_eq!(block.details, vec!["  今日 42次 · 1.2M tok"]);
     }
 
@@ -1127,11 +1340,194 @@ mod tests {
         p.error = Some("timeout".into());
         // 获取失败：无 balance → 黄档语义保留为行尾 ⚠️；身份徽章未知类型为 ⚪
         assert_eq!(
-            provider_menu_block(&p, fixed_now()).title,
+            provider_menu_block(&p, fixed_now()).display_title(),
             "Kimi — 获取失败 ⚠️"
         );
         let p2 = status_full("X", "X", None, None, None);
-        assert_eq!(provider_menu_block(&p2, fixed_now()).title, "X — 无数据");
+        assert_eq!(
+            provider_menu_block(&p2, fixed_now()).display_title(),
+            "X — 无数据"
+        );
+    }
+
+    // ---------- 托盘标题右对齐 ----------
+
+    /// 与真实菜单字体比例接近的假度量：ASCII 7pt、CJK 14pt、空格 3.6pt、thin 1.75、hair 0.8。
+    fn fake_width(s: &str) -> Option<f64> {
+        Some(
+            s.chars()
+                .map(|c| match c {
+                    ' ' => 3.6,
+                    '\u{2009}' => 1.75,
+                    '\u{200A}' => 0.8,
+                    c if c.is_ascii() => 7.0,
+                    _ => 14.0,
+                })
+                .sum(),
+        )
+    }
+
+    /// 非线性假度量（模拟字偶距/kerning）：整串宽度 = 字符宽度之和 + 每处相邻
+    /// 字形 +0.9。部分和 < 整串宽 ⇒ pad_title 按空格宽推算的补格数在整串复核时
+    /// 偏大，用于覆盖防御分支（线性度量恒精确命中，两分支测不到）。
+    fn kerned_width(s: &str) -> Option<f64> {
+        let mut w = 0.0;
+        let mut prev: Option<char> = None;
+        for c in s.chars() {
+            w += match c {
+                ' ' => 3.6,
+                '\u{2009}' => 1.75,
+                '\u{200A}' => 0.8,
+                c if c.is_ascii() => 7.0,
+                _ => 14.0,
+            };
+            if prev.is_some() {
+                w += 0.9;
+            }
+            prev = Some(c);
+        }
+        Some(w)
+    }
+
+    fn cash_provider(name: &str, alias: &str, v: f64) -> ProviderStatus {
+        let b = crate::models::BalanceData {
+            provider: name.into(),
+            available_balance: v,
+            voucher_balance: 0.0,
+            cash_balance: v,
+            total_balance: v,
+            currency: "CNY".into(),
+        };
+        status_full(name, alias, Some(b), None, None)
+    }
+
+    #[test]
+    fn detail_less_titles_are_right_aligned_to_widest_row() {
+        let zhipu_b = crate::models::BalanceData {
+            provider: "Zhipu".into(),
+            available_balance: 35.0,
+            voucher_balance: 0.0,
+            cash_balance: 0.0,
+            total_balance: 35.0,
+            currency: "%".into(),
+        };
+        let providers = [
+            cash_provider("Kimi API", "Kimi API", 10.0),
+            cash_provider("DeepSeek", "DS", 96.65),
+            // 有明细子项：标题必须保持「名称 — 值」
+            status_full(
+                "Zhipu",
+                "智谱",
+                Some(zhipu_b),
+                Some(vec![quota("5小时", 65.0, None)]),
+                None,
+            ),
+        ];
+        let has_icon = [true; 3];
+        let mut blocks: Vec<ProviderMenuBlock> = providers
+            .iter()
+            .map(|p| provider_menu_block(p, fixed_now()))
+            .collect();
+        let pairs: Vec<(&mut ProviderMenuBlock, bool)> = blocks.iter_mut().zip(has_icon).collect();
+        align_menu_titles(pairs, fake_width);
+
+        // 有子项：保持现有样式，值原样跟在别名后
+        assert_eq!(blocks[2].display_title(), "智谱 — 35%");
+
+        // 无子项：去掉分隔线，值右对齐到与最宽行一致的边界
+        assert!(!blocks[0].display_title().contains(" — "));
+        assert!(!blocks[1].display_title().contains(" — "));
+        assert!(blocks[0].display_title().starts_with("Kimi API"));
+        assert!(blocks[0].display_title().ends_with("¥10.00"));
+        assert!(blocks[1].display_title().ends_with("¥96.65"));
+
+        let row_width = |t: &str| fake_width(t).unwrap() + MENU_ICON_INDENT;
+        let widest_detail = blocks[2]
+            .details
+            .iter()
+            .map(|d| fake_width(d).unwrap())
+            .fold(0.0f64, f64::max);
+        assert!((row_width(blocks[0].display_title()) - widest_detail).abs() < 1.0);
+        assert!((row_width(blocks[1].display_title()) - widest_detail).abs() < 1.0);
+        assert!(
+            (row_width(blocks[0].display_title()) - row_width(blocks[1].display_title())).abs()
+                < 1.0
+        );
+    }
+
+    #[test]
+    fn alignment_is_skipped_when_measurement_unavailable() {
+        let providers = [cash_provider("Kimi API", "Kimi API", 10.0)];
+        let mut blocks: Vec<ProviderMenuBlock> = providers
+            .iter()
+            .map(|p| provider_menu_block(p, fixed_now()))
+            .collect();
+        let before = blocks[0].display_title().to_string();
+        align_menu_titles(vec![(&mut blocks[0], true)], |_| None);
+        assert_eq!(blocks[0].display_title(), before);
+        // 未对齐 ⇒ 两态显式化下 aligned_title 仍为空，展示态回落原始标题
+        assert!(blocks[0].display_title().contains(" — "));
+    }
+
+    #[test]
+    fn pad_title_falls_back_when_base_already_fits_target() {
+        // 保底恢复分支：base 已逼近 target（差 < 0.05）时不补空白，
+        // 回落原「 — 」样式（生产中理论上不发生，防御性路径）
+        let base = kerned_width("DS¥1.00").unwrap();
+        let out = pad_title("DS", "¥1.00", base, &kerned_width, (3.6, 1.75, 0.8));
+        assert_eq!(out.as_deref(), Some("DS — ¥1.00"));
+    }
+
+    #[test]
+    fn pad_title_trims_spaces_when_kerning_pushes_past_target() {
+        // 防超删减分支：按空格宽推算 n=5，但字偶距使整串复核超出 target，
+        // 须删到 n=4（线性度量下 n=5 恰好命中，该分支不可达）
+        let target = 80.0;
+        let out = pad_title("DS", "¥1.00", target, &kerned_width, (3.6, 1.75, 0.8)).unwrap();
+        let spaces = out.matches(' ').count();
+        assert_eq!(spaces, 4, "整串复核超 target 时应删减补格数");
+        assert!(out.starts_with("DS"));
+        assert!(out.ends_with("¥1.00"));
+        let w = kerned_width(&out).unwrap();
+        assert!(w <= target + 0.05, "补齐后不得超出 target：w={w}");
+        // 且尽量贴近：再删一格会明显欠宽（欠超一个空格宽）
+        assert!(w > target - 3.6, "删减过度：w={w}");
+    }
+
+    #[test]
+    fn alignment_mixed_icons_targets_differ_by_icon_indent() {
+        // 现有 9 种供应商都有 logo（has_icon 全 true），icon=false 属未来路径：
+        // 锁定「无图标行目标宽度比图标行大 MENU_ICON_INDENT」——两行右边界一致，
+        // 无图标行的文本末尾比图标行的文本末尾宽出图标列宽（23.8pt）。
+        // 余额取 62/42：避开 <¥10 触发低余额 ⚠️ 后缀（会干扰宽度断言）。
+        let providers = [
+            cash_provider("DeepSeek", "DS", 62.0),
+            cash_provider("Unknown", "NoLogo", 42.0),
+        ];
+        let mut blocks: Vec<ProviderMenuBlock> = providers
+            .iter()
+            .map(|p| provider_menu_block(p, fixed_now()))
+            .collect();
+        let pairs: Vec<(&mut ProviderMenuBlock, bool)> =
+            blocks.iter_mut().zip([true, false]).collect();
+        align_menu_titles(pairs, fake_width);
+
+        let t0 = blocks[0].display_title();
+        let t1 = blocks[1].display_title();
+        assert!(!t0.contains(" — "));
+        assert!(!t1.contains(" — "));
+        assert!(t0.starts_with("DS"));
+        assert!(t0.ends_with("¥62.00"));
+        assert!(t1.starts_with("NoLogo"));
+        assert!(t1.ends_with("¥42.00"));
+
+        // 图标行整行宽（文本 + 图标列）≈ 无图标行整行宽 ⇒ 文本宽差 ≈ 23.8pt
+        let full0 = fake_width(t0).unwrap() + MENU_ICON_INDENT;
+        let full1 = fake_width(t1).unwrap();
+        assert!(
+            (full1 - full0).abs() < 1.0,
+            "无图标行文本应比图标行文本宽出约 23.8pt：w1={full1}, w0+indent={full0}"
+        );
     }
 
     #[test]
@@ -1149,7 +1545,7 @@ mod tests {
         let quotas = vec![quota("5小时", 38.0, None), quota("7天Opus", 97.0, None)];
         let p = status_full("Claude Code", "Max工作", Some(b), Some(quotas), None);
         assert_eq!(
-            provider_menu_block(&p, fixed_now()).title,
+            provider_menu_block(&p, fixed_now()).display_title(),
             "Max工作 — 3% ⚠️"
         );
     }

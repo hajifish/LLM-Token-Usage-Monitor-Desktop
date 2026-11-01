@@ -1,5 +1,7 @@
 mod commands;
 mod config;
+#[cfg(target_os = "macos")]
+mod menu_align;
 mod models;
 mod notification;
 mod providers;

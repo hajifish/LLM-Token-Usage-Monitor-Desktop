@@ -14,8 +14,8 @@
     "windows": [
       {
         "title": "Token Usage",
-        "width": 780,
-        "height": 540,
+        "width": 720,
+        "height": 520,
         "resizable": false,
         "transparent": true,
         "titleBarStyle": "Overlay",

@@ -297,7 +297,14 @@ struct AuthCandidate {
 /// 扫描 userData 目录下的客户端凭据候选（抽目录参数便于测试）。
 /// `com.qoder.app*` → 国际、`com.qodercn.app*` → 国内；同区域多版本目录
 /// 与跨区域候选混排，按 mtime 降序（最近活跃登录优先）。
+///
+/// 钥匙串服务名候选按真机实测排序：本机同存 `Qoder CN App` / `Qoder CN` /
+/// `Qoder` 三个 Safe Storage 项（登录壳 / IDE / 国际版各一把钥匙），只有
+/// `<Electron app.name> Safe Storage` 才是加密对应 auth.v1.dat 的那把；
+/// 候选只是顺序，最终以「解密成功」为准（见 read_local_credential）。
 fn auth_candidates_under(app_support: &Path) -> Vec<AuthCandidate> {
+    const CN_KEYCHAIN: &[&str] = &["Qoder CN App", "Qoder CN", "Qoder"];
+    const GLOBAL_KEYCHAIN: &[&str] = &["Qoder App", "Qoder", "Qoder CN App"];
     let mut out: Vec<AuthCandidate> = Vec::new();
     let Ok(entries) = std::fs::read_dir(app_support) else {
         return out;
@@ -306,9 +313,9 @@ fn auth_candidates_under(app_support: &Path) -> Vec<AuthCandidate> {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         let (base, keychain_names) = if name.starts_with("com.qodercn.app") {
-            (CN_API_BASE, ["Qoder CN", "Qoder App"].as_slice())
+            (CN_API_BASE, CN_KEYCHAIN)
         } else if name.starts_with("com.qoder.app") {
-            (GLOBAL_API_BASE, ["Qoder", "Qoder App"].as_slice())
+            (GLOBAL_API_BASE, GLOBAL_KEYCHAIN)
         } else {
             continue;
         };
@@ -340,8 +347,10 @@ fn auth_candidates() -> Vec<AuthCandidate> {
         .unwrap_or_default()
 }
 
-/// 读取本地凭据：候选按 mtime 降序逐个尝试（钥匙串密码 → 解密 → 取 token）。
-/// 只在启动后的首次调用触发钥匙串授权弹窗；密码随后进程内缓存。
+/// 读取本地凭据：候选按 mtime 降序 × 钥匙串名候选逐组合试，
+/// **以「解密成功且含 token」为准**——机器上同存多个 Qoder 系 Safe Storage
+/// 项（登录壳 / IDE / 国际版），先拿到的密码未必是加密本文件的那把。
+/// 首次命中未授权项触发钥匙串授权弹窗；密码随后进程内缓存。
 fn read_local_credential() -> Result<(String, &'static str), ProviderError> {
     let candidates = auth_candidates();
     if candidates.is_empty() {
@@ -359,31 +368,30 @@ fn read_local_credential() -> Result<(String, &'static str), ProviderError> {
                 continue;
             }
         };
-        let password = match c
-            .keychain_names
-            .iter()
-            .find_map(|n| keychain_password(&format!("{n} Safe Storage")))
-        {
-            Some(p) => p,
-            None => {
+        for name in c.keychain_names {
+            let Some(password) = keychain_password(&format!("{name} Safe Storage")) else {
                 last_err =
                     "无法读取 Qoder 钥匙串密钥（Safe Storage），请在 macOS 授权弹窗中点击允许"
                         .to_string();
                 continue;
-            }
-        };
-        let token = match decrypt_auth_dat(&data, &password) {
-            Ok(plain) => parse_auth_token(&plain),
-            Err(reason) => {
-                last_err = format!("Qoder 本地凭据解密失败（{reason}）");
-                continue;
-            }
-        };
-        match token {
-            Some(t) => return Ok((t, c.base)),
-            None => {
-                last_err = "Qoder 本地凭据解析失败（解密内容缺 token），客户端存储格式可能已变更"
-                    .to_string()
+            };
+            let token = match decrypt_auth_dat(&data, &password) {
+                Ok(plain) => parse_auth_token(&plain),
+                Err(_) => {
+                    // 该钥匙串项不是加密本文件的密钥，换下一个候选名
+                    last_err =
+                        "Qoder 本地凭据解密失败（钥匙串密钥均不匹配），客户端存储格式可能已变更"
+                            .to_string();
+                    continue;
+                }
+            };
+            match token {
+                Some(t) => return Ok((t, c.base)),
+                None => {
+                    last_err =
+                        "Qoder 本地凭据解析失败（解密内容缺 token），客户端存储格式可能已变更"
+                            .to_string()
+                }
             }
         }
     }
@@ -861,9 +869,15 @@ mod tests {
         let cands = auth_candidates_under(&scratch.0);
         assert_eq!(cands.len(), 2, "无关目录与缺失 auth.v1.dat 的目录要跳过");
         assert_eq!(cands[0].base, GLOBAL_API_BASE, "mtime 新者在前");
-        assert_eq!(cands[0].keychain_names, ["Qoder", "Qoder App"]);
+        assert_eq!(
+            cands[0].keychain_names,
+            ["Qoder App", "Qoder", "Qoder CN App"]
+        );
         assert_eq!(cands[1].base, CN_API_BASE);
-        assert_eq!(cands[1].keychain_names, ["Qoder CN", "Qoder App"]);
+        assert_eq!(
+            cands[1].keychain_names,
+            ["Qoder CN App", "Qoder CN", "Qoder"]
+        );
     }
 
     #[test]

@@ -98,7 +98,7 @@ PAT 模式不做跨轮区域缓存：每轮最多多一组请求（默认 120s �
 | 解密/解析失败 | 「Qoder 本地凭据解析失败（<原因>），客户端格式可能已变更」 |
 | 本地 token 被拒（401/403） | 「Qoder 本地凭据已失效，请打开 Qoder / Qoder CN 客户端重新登录后重试」 |
 
-PAT 模式文案保持 v1 不变。
+PAT 模式文案沿用 v1 主体，c1f3352 起追加「入口实测可能不存在」免责声明（见下表引用）。
 
 ## 数据映射
 
@@ -122,7 +122,7 @@ PAT 模式文案保持 v1 不变。
 | 场景 | 文案 |
 | --- | --- |
 | api_key 为空（默认） | 本地凭据模式：Qoder 已加入 `needs_api_key` 免密豁免，照常轮询（v2 语义，非「跳过」）；api_key 非空才走 PAT 路径 |
-| 兑换失败（400/401/403 → AuthDenied） | 「Qoder PAT 无效或已过期，请在 qoder.com / qoder.cn 控制台 Settings → Personal Access Tokens 重新创建」 |
+| 兑换失败（400/401/403 → AuthDenied） | 「Qoder PAT 无效或已过期，请在 qoder.com / qoder.cn 控制台重建个人访问令牌（Settings → Personal Access Tokens 入口实测可能不存在，控制台入口以实际为准）」 |
 | 国际 + 国内均鉴权类失败 | 同上 |
 | 非鉴权类非 2xx | 「Qoder API error: <status>」 |
 | 响应解析失败 | 「Qoder 响应解析失败: <err>（接口可能已调整）」 |

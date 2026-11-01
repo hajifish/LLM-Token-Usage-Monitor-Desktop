@@ -1,8 +1,8 @@
-# Local LLM Token Usage Monitor Desktop
+# LLM Token Usage Monitor Desktop
 
 一款轻量级桌面应用，用于监控多个本地 LLM 服务商的 Token 用量与余额。基于 Tauri、React、TypeScript 和 Rust 构建。
 
-![License](https://img.shields.io/github/license/hajifish/Local-LLM-Token-Usage-Monitor-Desktop)
+![License](https://img.shields.io/github/license/hajifish/LLM-Token-Usage-Monitor-Desktop)
 
 ## 功能预览
 
@@ -13,19 +13,21 @@
 ## 功能特性
 
 - **多服务商支持** — 同时监控多个 LLM 平台的使用情况：
-  - DeepSeek
-  - Kimi（月之暗面）
-  - 智谱（GLM）
-- **实时用量追踪** — 一目了然地查看 Token 消耗与剩余额度
-- **系统集成托盘** — 在后台安静运行，原生支持系统托盘图标
+  - DeepSeek / Kimi API（月之暗面）/ 智谱（GLM）
+  - OpenAI / Anthropic（需组织管理员密钥）
+  - Codex / Claude Code / Kimi Code（自动读取本机 CLI 凭证）
+  - Qoder（自动读取本机客户端凭据，macOS；其他平台可填个人访问令牌 PAT）
+- **实时用量追踪** — 一目了然地查看 Token 消耗、余额与多配额桶剩余百分比
+- **低余额通知** — 余额或配额告警恶化时弹出系统通知，可在设置页开关并用测试通知自证链路
+- **系统集成托盘** — 在后台安静运行，原生支持系统托盘图标，菜单指标数值右对齐（macOS）
 - **开机自启** — 可选随系统启动自动运行
-- **定时轮询** — 按可配置的时间间隔自动刷新用量数据
+- **定时轮询** — 按可配置的时间间隔自动刷新用量数据（托盘菜单可选档位）
 - **应用内自动更新** — 自动检查新版本，可在应用内直接下载安装并重启
 - **低资源占用** — 基于 Tauri 轻量级 Rust 后端驱动
 
 ## 下载安装
 
-前往 [GitHub Releases](https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop/releases) 下载最新版本。
+前往 [GitHub Releases](https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop/releases) 下载最新版本。
 
 | 平台 | 芯片 | 文件格式 |
 |------|------|----------|
@@ -42,7 +44,7 @@
 由于应用未经 Apple 签名和公证，macOS 会阻止运行。打开终端执行以下命令即可解除限制：
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.app
+xattr -dr com.apple.quarantine /Applications/Token\ Usage.app
 ```
 
 > 如果应用不在 `/Applications` 目录，请替换为实际路径。
@@ -51,12 +53,10 @@ xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.a
 
 自 v0.2 起，应用内置自动更新能力：
 
-- **检查时机** — 启动 60 秒后检查一次，之后每 24 小时检查一次；也可在托盘菜单点击「检查更新」，或在设置页手动检查。
+- **检查时机** — 启动 60 秒后检查一次，之后每小时检查一次；也可在托盘菜单点击「检查更新」，或主窗口顶部的更新横幅中手动检查。
 - **检查对象** — GitHub Releases 上已发布的**最新正式版本**（草稿版本对外不可见，因此发布草稿即更新闸门）。已是最新版本时不会打扰你。
 - **下载与安装** — 发现新版本后可在应用内直接下载、安装并自动重启，无需再手动下载安装包。
 - **签名校验** — 更新包使用 minisign 签名，公钥内置于应用；校验不通过会放弃本次更新。
-- **忽略版本** — 可选择「忽略此版本」，同一版本不再提示；之后可在「设置 → 关于与更新」中取消忽略。
-- **关闭自动检查** — 可在「设置 → 关于与更新」中关闭自动检查，关闭后仍可手动检查。
 - **macOS 权限提示** — 替换 `/Applications` 下的应用需要管理员权限，安装时可能弹出系统密码框，属于正常现象。
 - **首次获取该能力** — v0.2 之前的版本不含更新模块，需要手动安装一次 v0.2 或更高版本；此后即可在应用内自动更新。
 
@@ -133,8 +133,8 @@ xattr -dr com.apple.quarantine /Applications/Local\ LLM\ Token\ Usage\ Monitor.a
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/hajifish/Local-LLM-Token-Usage-Monitor-Desktop.git
-cd Local-LLM-Token-Usage-Monitor-Desktop
+git clone https://github.com/hajifish/LLM-Token-Usage-Monitor-Desktop.git
+cd LLM-Token-Usage-Monitor-Desktop
 
 # 2. 安装前端依赖
 npm install
@@ -161,9 +161,9 @@ npm run tauri build
 
 ### 版本号与发版机制
 
-- 仓库内静态版本号（package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json）**仅为本地开发构建展示用**，不跟随每次发布手工对齐；真实版本号由发版流水线在构建时按 `v*` tag 总数派生（`0.(2+COUNT/256).(COUNT%256)`），全局只升不降（应用内更新按 semver 比较）。
-- master 每次 push 会由 auto-tag 自动创建日期 tag（`vYYYY.MM.DD.N`，纯记账行为）；**发版构建需手动触发**（`gh workflow run release.yml --ref <tag>`），构建产物进入 draft Release，手动发布草稿后更新才对外分发（发布即更新闸门）。因此可感知的版本号只在真正发版时前进，语义上约等于「发布次数计数器」。
-- CI 有一条版本一致性守卫：上述 5 处静态版本字段必须互相一致（仅要求内部自洽，不要求与最新发布一致），不一致时 PR 构建直接失败。
+- 版本号 = 发布 tag，格式 `vX.Y.Z`。release.yml 构建时取 `${tag#v}` 写入 5 处清单；号段由人工决定，全局只升不降（应用内更新按 semver 比较）。
+- 发版流程：develop → master 合并 → 手动 `git tag vX.Y.Z && git push origin vX.Y.Z` → tag push 自动触发 release.yml → 等草稿 Release 构建完成 → 手动 publish。publish 后 `releases/latest/download/latest.json` 才对外可见，发布草稿即更新分发闸门。
+- 仓库内静态版本号（package.json / package-lock.json / Cargo.toml / Cargo.lock / tauri.conf.json）**仅为本地开发构建展示用**，不随发布手工对齐；CI 有版本一致性守卫，要求这 5 处互相一致（仅要求内部自洽，不要求与最新发布一致），不一致时构建直接失败。
 
 ### 贡献指南
 
@@ -194,11 +194,15 @@ npm run tauri build
 │   │   │   ├── anthropic.rs    # Anthropic
 │   │   │   ├── codex.rs        # Codex（ChatGPT，CLI 凭证）
 │   │   │   ├── claude_code.rs  # Claude Code（CLI 凭证）
-│   │   │   └── kimi_code.rs    # Kimi Code（CLI 凭证）
+│   │   │   ├── kimi_code.rs    # Kimi Code（CLI 凭证）
+│   │   │   └── qoder.rs        # Qoder（本机客户端凭据 / PAT）
 │   │   ├── commands.rs         # Tauri 命令处理器
 │   │   ├── config.rs           # 配置管理
+│   │   ├── menu_align.rs       # 托盘菜单数值右对齐（macOS）
 │   │   ├── models.rs           # 数据模型
+│   │   ├── notification.rs     # 低余额系统通知
 │   │   ├── scheduler.rs        # 后台轮询调度器
+│   │   ├── secrets.rs          # 配置加密信封（XChaCha20-Poly1305）
 │   │   ├── tray.rs             # 系统托盘
 │   │   └── updater.rs          # 应用内自动更新
 │   └── Cargo.toml

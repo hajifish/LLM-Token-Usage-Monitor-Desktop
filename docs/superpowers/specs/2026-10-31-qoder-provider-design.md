@@ -2,7 +2,7 @@
 
 - 日期：2026-10-31（v2 方案切换：2026-11-01）
 - 分支：`feature/main-window-compact`（用户指定在本分支上补充，不另拉分支）
-- 状态：已确认设计（v2：本地凭据）
+- 状态：已确认设计（v2：本地凭据）。2026-11-01：v2.1 已按 PR #83 review 修订对齐实现（#95）
 
 ## 背景与目标
 
@@ -21,7 +21,7 @@ Qoder 是阿里基于 Qwen 系模型的 agentic IDE，额度单位为 Credits。
 | 配额展示 | 全部额度桶平铺（计划额度 / 加量包 / 每专属积分包一行） |
 | 主值语义 | 全部额度行中最小 `remaining_percent`（与托盘 `primary_quota` 一致） |
 | 签到 / 多账号 | 不做 |
-| 托盘 emoji | 🟣 |
+| 托盘图标 | `provider_logo` PNG（`icons/providers/qoder.png`）；v1 设想的 emoji 徽章机制已废弃 |
 
 ### 为什么走 PAT 而不是读本地凭据（v1 时判断，已被 v2 推翻）
 
@@ -56,7 +56,8 @@ api_key 非空（PAT 模式）:
 api_key 为空（本地凭据模式，默认）:
   扫描 ~/Library/Application Support/com.qoder.app*/auth.v1.dat（国际）
         ~/Library/Application Support/com.qodercn.app*/auth.v1.dat（国内）
-    → 多候选取 mtime 最新 → 钥匙串密码解密 → JSON 取 token（dt-）
+    → 全部候选按 mtime 降序 × 钥匙串名逐组合试解密
+    → 首个「解密成功且含 token」的组合即用（dt-）；全部失败报聚合错误
   → 按文件来源直接选 base（不盲探）→ GET quota/usage → plan（尽力）
 ```
 
@@ -70,8 +71,8 @@ PAT 模式不做跨轮区域缓存：每轮最多多一组请求（默认 120s �
 
 ### 凭据链（macOS）
 
-1. **候选文件**：`~/Library/Application Support/com.qoder.app*/auth.v1.dat`（国际）、`~/Library/Application Support/com.qodercn.app*/auth.v1.dat`（国内，本机实存 `com.qodercn.app.stable`）；多候选取 mtime 最新（最近活跃登录）。
-2. **钥匙串密码**：`security find-generic-password -w -s "<N> Safe Storage"`，N 依次试 `Qoder App`、`Qoder CN`。首次访问触发 macOS 标准授权弹窗，用户点「始终允许」后永久静默；应用内再叠加进程级密码缓存（内存，不落盘），即使用户只点「允许」也不会每轮弹窗。
+1. **候选文件**：`~/Library/Application Support/com.qoder.app*/auth.v1.dat`（国际）、`~/Library/Application Support/com.qodercn.app*/auth.v1.dat`（国内，本机实存 `com.qodercn.app.stable`）；同区域多版本目录与跨区域候选混排，按 mtime 降序排列（最近活跃登录优先），全部候选逐个尝试，**不是只取最新一份**。
+2. **钥匙串密码**：`security find-generic-password -w -s "<N> Safe Storage"`，N 按区域取三条有序候选——国内：`Qoder CN App` / `Qoder CN` / `Qoder`；国际：`Qoder App` / `Qoder` / `Qoder CN App`（对应登录壳 / IDE / 跨区域客户端各自的 Safe Storage 钥匙）。机器上同存多个 Qoder 系钥匙串项，候选只是顺序：**以「解密成功且含 token」为判据**，某候选名解密失败（不是加密本文件的那把钥匙）就换下一个，不是先到先得。首次访问触发 macOS 标准授权弹窗，用户点「始终允许」后永久静默；应用内再叠加进程级密码缓存（内存，不落盘），即使用户只点「允许」也不会每轮弹窗。
 3. **解密**：文件 = 前缀 `v10` + AES-128-CBC 密文（IV = 16 个空格 0x20），密钥 = PBKDF2-SHA1(密码, `"saltysalt"`, 1003 轮, 16 字节)，PKCS7 去填充。
 4. **明文 JSON**：`{token: "dt-…", refreshToken, expiresAt, user: {id, name, email}}`。只取 `token`，其余字段（含 refreshToken）不落日志。
 
@@ -120,14 +121,16 @@ PAT 模式文案保持 v1 不变。
 
 | 场景 | 文案 |
 | --- | --- |
-| PAT 为空 | 调度层按现有规则跳过（加入 needs_api_key 判定，不加免密名单） |
-| 兑换失败（401/403） | 「Qoder PAT 无效或已过期，请在 Settings → Personal Access Tokens 重新创建」 |
-| 国际 + 国内均 401/403 | 同上 |
+| api_key 为空（默认） | 本地凭据模式：Qoder 已加入 `needs_api_key` 免密豁免，照常轮询（v2 语义，非「跳过」）；api_key 非空才走 PAT 路径 |
+| 兑换失败（400/401/403 → AuthDenied） | 「Qoder PAT 无效或已过期，请在 qoder.com / qoder.cn 控制台 Settings → Personal Access Tokens 重新创建」 |
+| 国际 + 国内均鉴权类失败 | 同上 |
 | 非鉴权类非 2xx | 「Qoder API error: <status>」 |
 | 响应解析失败 | 「Qoder 响应解析失败: <err>（接口可能已调整）」 |
 | 网络失败 | 「Qoder 请求失败: <err>」 |
 
 区域探测中任一端点的网络层失败直接返回错误，不切换端点重试。
+
+**400 → AuthDenied 的语义依据（#94）**：兑换端点对「无效 / 不属于本区域」的 PAT 一律返回 400 BadRequest（双区域逆向实测一致），401/403 多见于过期——三者统一按「凭据被拒」（`StepError::AuthDenied`）处理，才能正确驱动「切区重试 → 双失败报 PAT 文案」的探测决策；400 是该端点鉴权失败的主导状态码，漏掉它 CN 区 PAT 用户只会看到裸 400。因此 `StepError` 枚举与模块头的权威文档必须注明 400（兑换端点主导状态码）——代码内侧的枚举文档补注与回归测试由 #94 跟进，不在本 spec 范围。
 
 ## 接线触点
 
@@ -136,8 +139,8 @@ PAT 模式文案保持 v1 不变。
 - `src-tauri/src/providers/qoder.rs`（新增）：`QoderProvider` 实现 `LlmProvider`
 - `src-tauri/src/providers/mod.rs`：`mod qoder;`、`ALL_PROVIDER_TYPES`、`create_provider`、`display_name`
 - `src-tauri/src/tray.rs`：`tray_short_code` → `"QD"`（遍历守卫测试自动覆盖）
-- `src-tauri/src/scheduler.rs`：emoji → `"🟣"`；**不**加入免密名单
-- `src/components/Settings.tsx`：`PROVIDER_OPTIONS` 增加 `{ value: 'Qoder', label: 'Qoder' }`
+- `src-tauri/src/scheduler.rs`：`provider_logo` → `include_bytes!("../icons/providers/qoder.png")`（v1 设想的 emoji 徽章机制已废弃）；**加入 `needs_api_key` 免密豁免**（v2，见「设置页与调度」节）
+- `src/components/Settings.tsx`：`PROVIDER_OPTIONS` 增加 `{ value: 'Qoder', label: 'Qoder' }`；并加入 `CLI_OAUTH_PROVIDERS` 免密名单（v2）
 - `src/components/UsagePanel.tsx`：`BRAND_LOGOS` 增加 `Qoder: '/providers/qoder.png'`
 - `public/providers/qoder.png`：官方 logo
 
@@ -151,7 +154,7 @@ Rust 单测（`qoder.rs` 内，网络函数依赖注入或拆纯函数解析）�
 2. 行映射：userQuota / addOnQuota / dedicatedResourcePackages 的名称、剩余%、`reset_at` 有无（专属包必须为 None）；
 3. 空桶过滤：三角全零不生成行；`available=false` 的包跳过；
 4. 主值：多行时取最小剩余百分比；
-5. 错误映射：401/403 → PAT 文案；500 → 通用文案；
+5. 错误映射：AuthDenied → PAT / 本地凭据两种文案（按模式区分）；500 / 网络 / 解析 → 通用文案且不触发切区；
 6. 区域探测：先国际失败后国内成功（用纯函数 `select_region` 或可注入的请求层覆盖）。
 
 守卫测试：`ALL_PROVIDER_TYPES` ↔ `display_name` ↔ `tray_short_code` 的现有遍历守卫应自动覆盖新类型。
@@ -168,7 +171,7 @@ Rust 单测（`qoder.rs` 内，网络函数依赖注入或拆纯函数解析）�
 ## 不在本次范围
 
 - 每日签到 / 自动领取 Credits；
-- 多账号管理（多凭据文件只取 mtime 最新一份）；
+- 多账号管理（每轮只取一个凭据：候选按 mtime 降序 × 钥匙串名逐组合试，首个「解密成功且含 token」者即用；不做多账号聚合展示）；
 - 网页会话 Cookie 路径与逐资源包明细接口（`/api/v2/me/usages/big_model_credits`）——只认浏览器 Cookie；
 - 卡面展示绝对 Credits 数值；
 - refreshToken 自动刷新流程（需客户端风控签名）。

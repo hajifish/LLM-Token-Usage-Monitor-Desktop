@@ -833,3 +833,4 @@ git status --short          # 逐项确认：并行 WIP 文件不得混入
 - 验证：153 测试 + clippy/fmt/eslint/build 全绿；新增 6 个单测覆盖解密 roundtrip（测试内同算法合成密文）、token 提取、候选区域映射与 mtime 排序、双模式错误文案。
 - 并行 WIP 隔离：Cargo.toml/Cargo.lock（objc2 托盘对齐依赖）与 scheduler.rs 混合 hunk 手工拆分选择性暂存，提交内 0 行 objc2。
 - 真机额度验证待用户配合：应用读取钥匙串时会触发 macOS 标准授权弹窗（开发会话不代提），允许后配额卡片即出现。
+- 钥匙串候选补全（提交 21c371f，PR #83 review 后）：每区域三条有序候选（国内：Qoder CN App / Qoder CN / Qoder；国际：Qoder App / Qoder / Qoder CN App）；多凭据候选不再「取 mtime 最新一份」，改为全部候选按 mtime 降序 × 钥匙串名逐组合试，以「解密成功且含 token」为判据，全部失败报聚合错误——spec 已按 #95 同步该语义。

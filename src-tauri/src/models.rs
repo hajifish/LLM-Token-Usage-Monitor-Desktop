@@ -57,6 +57,8 @@ fn default_show_in_tray() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub providers: Vec<ProviderConfig>,
+    /// 刷新间隔（秒）；旧配置文件缺此字段时由 serde default 兜底为 60
+    #[serde(default = "default_refresh_interval")]
     pub refresh_interval: u64,
     /// 是否自动检查更新（启动 60 秒后首查，之后每小时一次）
     #[serde(default = "default_auto_check_update")]
@@ -64,6 +66,10 @@ pub struct AppConfig {
     /// 托盘文字总开关：关闭后菜单栏仅显示图标
     #[serde(default = "default_tray_text_enabled")]
     pub tray_text_enabled: bool,
+}
+
+fn default_refresh_interval() -> u64 {
+    60
 }
 
 fn default_auto_check_update() -> bool {
@@ -78,7 +84,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             providers: Vec::new(),
-            refresh_interval: 60,
+            refresh_interval: default_refresh_interval(),
             auto_check_update: default_auto_check_update(),
             tray_text_enabled: default_tray_text_enabled(),
         }

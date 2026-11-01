@@ -574,6 +574,35 @@ mod tests {
         );
     }
 
+    /// 任何缺 refresh_interval 字段的配置（手改 / 异常截断 / 外部工具产出）都应能加载，
+    /// 并回退到默认 60 秒，而不是导致整体反序列化失败。
+    #[test]
+    fn legacy_config_without_refresh_interval_gets_default() {
+        let legacy = r#"{"providers":[{"name":"DeepSeek","api_key":"sk-x","enabled":true}]}"#;
+        let cfg: AppConfig = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            cfg.refresh_interval, 60,
+            "缺省的 refresh_interval 应默认为 60"
+        );
+        assert!(
+            cfg.providers[0].show_in_tray,
+            "其余缺省字段同样由 serde default 兜底"
+        );
+    }
+
+    /// 字段存在但值为 0 时，serde 原样加载为 0：serde default 只兜「缺失」不兜「0」，
+    /// 加载层不做矫正——非法值由使用点钳制（调度器 `.max(30)`、托盘预设档最短 60 秒）。
+    /// 此测试固化该分层语义：若未来把钳制上移到加载层，此处应同步更新。
+    #[test]
+    fn refresh_interval_zero_is_loaded_as_is_without_clamping() {
+        let raw = r#"{"providers":[{"name":"DeepSeek","api_key":"sk-x","enabled":true}],"refresh_interval":0}"#;
+        let cfg: AppConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            cfg.refresh_interval, 0,
+            "加载层不矫正，0 应原样保留（钳制由使用点负责）"
+        );
+    }
+
     /// 新增托盘字段随加密信封 roundtrip 不丢失。
     #[test]
     fn tray_fields_survive_save_load_roundtrip() {

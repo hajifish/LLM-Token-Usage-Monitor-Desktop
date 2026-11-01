@@ -22,7 +22,7 @@ const PROVIDER_OPTIONS = [
 ];
 
 /** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
-const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code']);
+const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
 
 /** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
 const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';
@@ -445,7 +445,9 @@ function Settings({ onBack }: SettingsProps) {
                       ? '自动从 ~/.codex/auth.json 读取凭证'
                       : p.name === 'Claude Code'
                         ? '自动从 ~/.claude/credentials.json 读取凭证'
-                        : '自动从 ~/.kimi-code/config.toml 读取凭证'}
+                        : p.name === 'Qoder'
+                          ? '自动读取本机 Qoder / Qoder CN 客户端登录凭据（需已登录，首次弹窗请点允许）'
+                          : '自动从 ~/.kimi-code/config.toml 读取凭证'}
                   </span>
                 ) : (
                   <input

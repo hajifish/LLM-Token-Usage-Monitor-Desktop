@@ -284,7 +284,9 @@
 }
 
 /* Big main number: left-aligned with the label on the same line.
-   Extra vertical breathing makes the remaining balance the focal point. */
+   The zone's own vertical whitespace is tightened (16px/14px -> 6px/2px),
+   handing the freed vertical space to card padding and detail line spacing
+   so the 30px number stays the focal point. */
 .p-card-main {
   display: flex;
   align-items: baseline;

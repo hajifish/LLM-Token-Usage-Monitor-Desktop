@@ -823,3 +823,13 @@ git status --short          # 逐项确认：并行 WIP 文件不得混入
 - Task 4/5 的并行 WIP 文件（scheduler.rs、UsagePanel.tsx）按 hunk 过滤选择性暂存，未混入他会话改动。
 - 真机验证：端点契约实测（兑换端点双区域 400 语义 → 触发 5cbbb57 修正）；应用级 E2E 走通（明文配置迁移 → 调度轮询 → 区域回退 → 友好错误，3 个轮询周期稳定）；错误路径 E2E 测试输出符合预期。
 - 视觉截图验证因屏幕锁定未做；错误卡渲染路径由单测覆盖。真实额度数据展示需用户在设置中粘贴有效 PAT。
+
+## v2 追加执行记录（2026-11-01，本地凭据方案切换）
+
+用户反馈：Qoder 控制台实际无法获取外部 PAT，v1 的粘贴路径不可达；改走本机客户端凭据（CreditDaddy 公开源码给出的完整配方）。spec 已同步 v2（提交 4ab9a9c）。
+
+- 凭据层重写（提交 0bd324a）：qoder.rs 新增本地凭据层（扫描 `com.qoder{,cn}.app*/auth.v1.dat` → 钥匙串 Safe Storage → PBKDF2-SHA1 + AES-128-CBC 解密 → dt- 会话 token 直连）；api_key 为空 = 本地凭据（默认免密），非空保留 v1 PAT 路径作兜底。新增依赖 aes/cbc/pbkdf2/hmac/sha1（均纯 Rust）。
+- 免密接线（提交 cf7c915）：scheduler.rs `needs_api_key` 豁免 + Settings.tsx `CLI_OAUTH_PROVIDERS`（带「自动读取本机客户端凭据」提示）。
+- 验证：153 测试 + clippy/fmt/eslint/build 全绿；新增 6 个单测覆盖解密 roundtrip（测试内同算法合成密文）、token 提取、候选区域映射与 mtime 排序、双模式错误文案。
+- 并行 WIP 隔离：Cargo.toml/Cargo.lock（objc2 托盘对齐依赖）与 scheduler.rs 混合 hunk 手工拆分选择性暂存，提交内 0 行 objc2。
+- 真机额度验证待用户配合：应用读取钥匙串时会触发 macOS 标准授权弹窗（开发会话不代提），允许后配额卡片即出现。

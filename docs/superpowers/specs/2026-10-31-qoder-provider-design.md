@@ -86,7 +86,7 @@ PAT 模式不做跨轮区域缓存：每轮最多多一组请求（默认 120s �
 
 ### 设置页与调度
 
-- Qoder 加入免密供应商名单：`scheduler.rs` 的 `needs_api_key` 豁免 + `Settings.tsx` 的 `CLI_OAUTH_PROVIDERS`，UI 提示「需已登录 Qoder / Qoder CN 桌面客户端」。
+- Qoder 加入免密供应商名单：`scheduler.rs` 的 `needs_api_key` 豁免 + `Settings.tsx` 的 `KEYLESS_PROVIDERS`，UI 提示「需已登录 Qoder / Qoder CN 桌面客户端」。
 - api_key 留空 = 本地凭据模式（默认）；非空仍按 PAT 处理（保留 v1 逻辑作为高级兜底，测试继续覆盖）。
 
 ### 错误文案（本地凭据模式新增/变更）
@@ -140,7 +140,7 @@ PAT 模式文案保持 v1 不变。
 - `src-tauri/src/providers/mod.rs`：`mod qoder;`、`ALL_PROVIDER_TYPES`、`create_provider`、`display_name`
 - `src-tauri/src/tray.rs`：`tray_short_code` → `"QD"`（遍历守卫测试自动覆盖）
 - `src-tauri/src/scheduler.rs`：`provider_logo` → `include_bytes!("../icons/providers/qoder.png")`（v1 设想的 emoji 徽章机制已废弃）；**加入 `needs_api_key` 免密豁免**（v2，见「设置页与调度」节）
-- `src/components/Settings.tsx`：`PROVIDER_OPTIONS` 增加 `{ value: 'Qoder', label: 'Qoder' }`；并加入 `CLI_OAUTH_PROVIDERS` 免密名单（v2）
+- `src/components/Settings.tsx`：`PROVIDER_OPTIONS` 增加 `{ value: 'Qoder', label: 'Qoder' }`；并加入 `KEYLESS_PROVIDERS` 免密名单（v2）
 - `src/components/UsagePanel.tsx`：`BRAND_LOGOS` 增加 `Qoder: '/providers/qoder.png'`
 - `public/providers/qoder.png`：官方 logo
 

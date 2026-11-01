@@ -325,7 +325,16 @@ where
 /// 但菜单项实际是否带图标还取决于重建处 `Image::from_bytes` 解码成功——解码失败时
 /// 该行无图标、对齐仍按 `MENU_ICON_INDENT` 缩进（解码失败属极端路径，偏差可接受）。
 fn apply_menu_alignment(blocks: &mut [ProviderMenuBlock], providers: &[&ProviderStatus]) {
-    if blocks.is_empty() || blocks.len() != providers.len() {
+    if blocks.is_empty() {
+        return;
+    }
+    if blocks.len() != providers.len() {
+        // 不变量被破坏（菜单块与供应商一一对应）——降级为不对齐，留痕便于定位。
+        log::debug!(
+            "apply_menu_alignment: 长度不匹配（blocks={} providers={}），本轮跳过对齐",
+            blocks.len(),
+            providers.len()
+        );
         return;
     }
     #[cfg(target_os = "macos")]

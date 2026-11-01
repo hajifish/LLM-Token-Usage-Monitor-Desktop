@@ -212,6 +212,21 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
+  /** 发送测试通知：桌面端 API 无法检测投递失败与权限拒绝（后端无条件返回成功），
+   *  链路是否真正打通只能由用户亲眼看一次通知来确认。 */
+  const [testNotifyBusy, setTestNotifyBusy] = useState(false);
+  const sendTestNotification = async () => {
+    setTestNotifyBusy(true);
+    try {
+      await invoke('send_test_notification');
+    } catch (e) {
+      // 失败不静默：走与 handleSave 同一 toast 通道
+      setMessage(`测试通知发送失败: ${e}`);
+    } finally {
+      setTestNotifyBusy(false);
+    }
+  };
+
   const updateProvider = (index: number, field: keyof ProviderConfig, value: string | boolean) => {
     if (!config) return;
     const newProviders = [...config.providers];
@@ -423,8 +438,19 @@ function Settings({ onBack }: SettingsProps) {
                 />
               </label>
             </div>
+            <div className="update-row">
+              <span className="update-row-label">验证通知链路是否打通</span>
+              <button
+                className="cancel-btn"
+                onClick={sendTestNotification}
+                disabled={testNotifyBusy}
+              >
+                {testNotifyBusy ? '发送中...' : '发送测试通知'}
+              </button>
+            </div>
             <span className="update-hint">
               开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
+              能否收到取决于系统通知权限（设置 → 通知），建议用测试通知自证。
             </span>
           </div>
         </div>

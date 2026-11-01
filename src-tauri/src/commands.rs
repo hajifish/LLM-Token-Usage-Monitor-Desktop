@@ -38,6 +38,15 @@ pub async fn trigger_refresh(notify: tauri::State<'_, Arc<Notify>>) -> Result<()
     Ok(())
 }
 
+/// 发送一条固定文案的测试通知，用于设置页「发送测试通知」按钮。
+/// 桌面端无法检测投递失败/权限拒绝（见 notification::send 的失败语义），
+/// 由用户自证通知链路是否畅通。
+#[tauri::command]
+pub async fn send_test_notification(app: AppHandle) -> Result<(), String> {
+    crate::notification::send_test_notification(&app);
+    Ok(())
+}
+
 /// 统一的配置落盘入口：备份守卫 → 加密原子写入 → 写回内存态。
 ///
 /// `save_config` 与其他直改配置的路径共用，避免写入保护逻辑分叉。

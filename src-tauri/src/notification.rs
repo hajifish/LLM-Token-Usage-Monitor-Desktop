@@ -135,8 +135,20 @@ pub fn on_summary_refreshed(app: &AppHandle, enabled: bool, summary: &UsageSumma
 }
 
 /// 发送单条系统通知（macOS 上 app 未打包时由插件归属到 com.apple.Terminal，
-/// 打包后归属应用自身；发送失败仅记日志，不打断轮询）
+/// 打包后归属应用自身；不打断轮询）。
+///
+/// 失败语义（如实）：tauri-plugin-notification 2.4.0 桌面端 show() 把真实投递丢进
+/// spawn 任务吞掉并无条件返回 Ok，下方 Err 分支不可达、投递失败与权限拒绝均不可检测，
+/// 通知会静默消失。「发送失败即丢一条（基线不回滚，等下次等级变化再发）」是有意权衡：
+/// 不回滚基线可避免每轮对同一告警重复轰炸；用户可在设置页「发送测试通知」自证链路。
 fn send(app: &AppHandle, event: &AlertEvent) {
+    // 投递结果不可检测（见上），至少让「尝试过发送」可追溯：
+    // 事件只在等级恶化迁移时产生（每轮每供应商至多一条），无日志风暴风险
+    log::info!(
+        "发送低余额通知：{}（等级 {}）",
+        event.display_name,
+        event.level
+    );
     let (title, body) = notification_text(event.level, &event.display_name, &event.progress);
     if let Err(e) = app
         .notification()
@@ -146,7 +158,28 @@ fn send(app: &AppHandle, event: &AlertEvent) {
         .sound(DEFAULT_SOUND)
         .show()
     {
+        // 死代码：桌面端插件无条件返回 Ok；保留分支仅防御上游后端行为变化
         log::warn!("系统通知发送失败: {}", e);
+    }
+}
+
+/// 发送一条固定文案的测试通知（设置页「发送测试通知」按钮入口）。
+///
+/// 桌面端 API 无法检测投递失败与权限拒绝（见 send 的失败语义），用户在设置页
+/// 点按钮自证链路是否畅通是唯一可靠反馈；发送成功仅代表调用链路走通，
+/// 能否真正收到取决于系统通知权限。
+pub(crate) fn send_test_notification(app: &AppHandle) {
+    log::info!("发送测试通知（用户自证通知链路）");
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title("🔔 测试通知")
+        .body("低余额通知链路正常；若未收到本条，请检查系统通知权限。")
+        .sound(DEFAULT_SOUND)
+        .show()
+    {
+        // 死代码：桌面端插件无条件返回 Ok；保留分支仅防御上游后端行为变化
+        log::warn!("测试通知发送失败: {}", e);
     }
 }
 

@@ -12,7 +12,9 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
-use commands::{get_config, get_config_health, get_usage, save_config, trigger_refresh};
+use commands::{
+    get_config, get_config_health, get_usage, save_config, send_test_notification, trigger_refresh,
+};
 use models::UsageSummary;
 use scheduler::Scheduler;
 use tauri_plugin_log::{Target, TargetKind};
@@ -82,6 +84,7 @@ pub fn run() {
             get_config,
             get_config_health,
             save_config,
+            send_test_notification,
             trigger_refresh,
             updater::get_update_status,
             updater::check_update,

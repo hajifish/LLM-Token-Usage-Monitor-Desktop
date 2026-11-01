@@ -72,9 +72,14 @@ pub(crate) struct AlertEvent {
 
 /// 迁移检测（纯函数）：上轮基线 + 本轮 summary → (待发通知列表, 新基线表)。
 /// balance 缺失（禁用 / 获取失败 / 无数据）的供应商跳过判定且不更新基线。
+///
+/// enabled 作为签名参数是刻意设计（非胶水层细节）：enabled = false 时待发事件
+/// 过滤为空、基线照常刷新——「关开关期间仍记基线、重开不对存量告警补发」这一
+/// 核心不变量由此成为纯函数契约，可直接单测，防止「提前退出上提」类重构悄悄破坏。
 pub(crate) fn detect_alert_transitions(
     prev: &HashMap<String, u8>,
     summary: &UsageSummary,
+    enabled: bool,
 ) -> (Vec<AlertEvent>, HashMap<String, u8>) {
     let mut next = prev.clone();
     let mut events = Vec::new();
@@ -102,14 +107,17 @@ pub(crate) fn detect_alert_transitions(
         next.insert(key, level);
         events.extend(event);
     }
-    (events, next)
+    // 关开关期间事件过滤为空、基线照记（见函数文档）：重开开关后同等级不补发
+    let pending = if enabled { events } else { Vec::new() };
+    (pending, next)
 }
 
 /// 各供应商上一轮告警等级基线（内存态；重启归零 → 启动首轮只记基线不发）。
 #[derive(Default)]
 pub struct AlertBaseline(Mutex<HashMap<String, u8>>);
 
-/// 轮询收口点：更新基线并按需发送系统通知。enabled = false 时仍刷新基线但不发送，
+/// 轮询收口点：更新基线并按需发送系统通知。enabled 门控下沉在
+/// [`detect_alert_transitions`] 内（关开关期间基线照记、事件过滤为空），
 /// 避免重新打开开关后对存量告警补发旧状态。
 pub fn on_summary_refreshed(app: &AppHandle, enabled: bool, summary: &UsageSummary) {
     // 基线状态首次使用时登记（参照 tray::create_update_item 的 manage-on-demand 模式）
@@ -122,13 +130,10 @@ pub fn on_summary_refreshed(app: &AppHandle, enabled: bool, summary: &UsageSumma
     };
     let events = {
         let mut inner = baseline.0.lock().unwrap_or_else(|e| e.into_inner());
-        let (events, next) = detect_alert_transitions(&inner, summary);
+        let (events, next) = detect_alert_transitions(&inner, summary, enabled);
         *inner = next;
         events
     };
-    if !enabled {
-        return;
-    }
     for event in &events {
         send(app, event);
     }
@@ -279,7 +284,7 @@ mod tests {
             status("DeepSeek", "工作号", Some(balance(5.0, "CNY"))), // 0→1 恶化
             status("Zhipu", "智谱", Some(balance(88.0, "%"))),       // 0→0 平静
         ]);
-        let (events, next) = detect_alert_transitions(&prev, &s);
+        let (events, next) = detect_alert_transitions(&prev, &s, true);
         assert_eq!(events.len(), 1, "仅恶化的供应商应产生通知");
         assert_eq!(events[0].level, 1);
         assert_eq!(events[0].display_name, "工作号");
@@ -300,7 +305,7 @@ mod tests {
             status("DeepSeek", "工作号", Some(balance(0.0, "CNY"))), // 1→2 恶化
             status("DeepSeek", "私人号", Some(balance(3.0, "CNY"))), // 0→1 恶化
         ]);
-        let (events, next) = detect_alert_transitions(&prev, &s);
+        let (events, next) = detect_alert_transitions(&prev, &s, true);
         assert_eq!(events.len(), 2);
         assert_eq!(next.get("DeepSeek|工作号"), Some(&2u8));
         assert_eq!(next.get("DeepSeek|私人号"), Some(&1u8));
@@ -315,7 +320,7 @@ mod tests {
             status("DeepSeek", "DeepSeek", Some(balance(50.0, "CNY"))), // 首个：正常
             status("DeepSeek", "DeepSeek", Some(balance(0.0, "CNY"))),  // 同键：耗尽，被跳过
         ]);
-        let (events, next) = detect_alert_transitions(&prev, &s);
+        let (events, next) = detect_alert_transitions(&prev, &s, true);
         assert!(
             events.is_empty(),
             "同键碰撞时后续账号不应产生通知（否则基线被互覆、告警被吞）"
@@ -335,13 +340,13 @@ mod tests {
             status("DeepSeek", "DeepSeek", Some(balance(50.0, "CNY"))),
             status("DeepSeek", "DeepSeek", Some(balance(0.0, "CNY"))),
         ]);
-        let (_, next) = detect_alert_transitions(&prev, &s);
+        let (_, next) = detect_alert_transitions(&prev, &s, true);
         let worsened = summary(vec![status(
             "DeepSeek",
             "DeepSeek",
             Some(balance(5.0, "CNY")),
         )]);
-        let (events, _) = detect_alert_transitions(&next, &worsened);
+        let (events, _) = detect_alert_transitions(&next, &worsened, true);
         assert_eq!(events.len(), 1, "键持有者下轮恶化应正常发出");
         assert_eq!(events[0].level, 1);
     }
@@ -354,7 +359,7 @@ mod tests {
             "DeepSeek",
             Some(balance(0.0, "CNY")),
         )]);
-        let (events, next) = detect_alert_transitions(&HashMap::new(), &s);
+        let (events, next) = detect_alert_transitions(&HashMap::new(), &s, true);
         assert!(events.is_empty(), "首轮不应发通知");
         assert_eq!(next.get("DeepSeek|DeepSeek"), Some(&2u8));
     }
@@ -368,7 +373,7 @@ mod tests {
             "DeepSeek",
             Some(balance(50.0, "CNY")),
         )]);
-        let (events, next) = detect_alert_transitions(&prev, &recovered);
+        let (events, next) = detect_alert_transitions(&prev, &recovered, true);
         assert!(events.is_empty(), "好转不发");
         assert_eq!(next.get("DeepSeek|DeepSeek"), Some(&0u8));
         // 恢复后再恶化 → 重新发
@@ -377,7 +382,7 @@ mod tests {
             "DeepSeek",
             Some(balance(0.0, "CNY")),
         )]);
-        let (events, _) = detect_alert_transitions(&next, &worsened);
+        let (events, _) = detect_alert_transitions(&next, &worsened, true);
         assert_eq!(events.len(), 1, "恢复后再次恶化应重新发通知");
         assert_eq!(events[0].level, 2);
     }
@@ -389,13 +394,48 @@ mod tests {
         let mut errored = status("DeepSeek", "DeepSeek", None);
         errored.error = Some("timeout".into());
         let s = summary(vec![errored]);
-        let (events, next) = detect_alert_transitions(&prev, &s);
+        let (events, next) = detect_alert_transitions(&prev, &s, true);
         assert!(events.is_empty());
         assert_eq!(
             next.get("DeepSeek|DeepSeek"),
             Some(&1u8),
             "无数据轮基线应保持不变"
         );
+    }
+
+    // ---------- enabled 门控：关开关期间基线照记、重开不补发 ----------
+
+    #[test]
+    fn disabled_round_filters_events_but_refreshes_baseline() {
+        // 关开关期间 0→2 恶化：无事件但基线照常刷新为 2——
+        // 若基线不记，重开开关那轮会把存量告警判为恶化 → 补发轰炸
+        let prev = HashMap::from([("DeepSeek|DeepSeek".to_string(), 0u8)]);
+        let s = summary(vec![status(
+            "DeepSeek",
+            "DeepSeek",
+            Some(balance(0.0, "CNY")),
+        )]);
+        let (events, next) = detect_alert_transitions(&prev, &s, false);
+        assert!(events.is_empty(), "关开关期间不应产生待发事件");
+        assert_eq!(
+            next.get("DeepSeek|DeepSeek"),
+            Some(&2u8),
+            "基线应照常刷新（不变量：enabled 门控只过滤事件，不冻结基线）"
+        );
+    }
+
+    #[test]
+    fn reenabling_at_same_level_does_not_replay() {
+        // 重开开关后同等级：基线已在上轮（关开关期间）刷新 → 不补发旧状态
+        let prev = HashMap::from([("DeepSeek|DeepSeek".to_string(), 0u8)]);
+        let s = summary(vec![status(
+            "DeepSeek",
+            "DeepSeek",
+            Some(balance(0.0, "CNY")),
+        )]);
+        let (_, next) = detect_alert_transitions(&prev, &s, false);
+        let (events, _) = detect_alert_transitions(&next, &s, true);
+        assert!(events.is_empty(), "重开开关后同等级不应补发通知");
     }
 
     // ---------- progress_text：进度文案与状态条同源 ----------

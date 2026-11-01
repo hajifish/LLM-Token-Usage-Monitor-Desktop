@@ -140,7 +140,10 @@ function Settings({ onBack }: SettingsProps) {
    *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
    *  在途期间 checkbox 置 disabled（可见、可预期），不静默丢弃点击。 */
   const [trayBusy, setTrayBusy] = useState(false);
-  /** 与后端 provider_show_in_tray 同语义的匹配键：name + trim 后 alias（空回退 name）。 */
+  /** 本页的配置行定位键：name + trim 后 alias（空回退 name）。
+   *  与后端 provider_show_in_tray 的匹配键并非同口径：后端空回退 display_name
+   *  （如 Zhipu→智谱），本键空回退 name——两套键空间互不相交，本键仅用于在
+   *  fresh.providers 中唯一定位配置行，不与后端互比。 */
   const providerKey = (p: ProviderConfig) => {
     const a = (p.alias || '').trim();
     return `${p.name}|${a === '' ? p.name : a}`;
@@ -190,6 +193,43 @@ function Settings({ onBack }: SettingsProps) {
       setConfig((c) => (c ? { ...c } : c));
     } finally {
       setTrayBusy(false);
+    }
+  };
+
+  /** 低余额通知开关即时生效：读最新配置 → 仅改本字段 → 落盘。
+   *  与 applyTrayDisplay 同模式：不经「保存」按钮，后端写入成功才同步本地状态。 */
+  const [notifBusy, setNotifBusy] = useState(false);
+  const applyNotificationEnabled = async (value: boolean) => {
+    setNotifBusy(true);
+    try {
+      const fresh = await invoke<AppConfig>('get_config');
+      fresh.notifications_enabled = value;
+      await invoke('save_config', { newConfig: fresh });
+      setConfig((cur) => (cur ? { ...cur, notifications_enabled: value } : cur));
+    } catch (e) {
+      // 失败不静默：走 toast 通道。受控 checkbox 回弹的主因是 React 18 受控组件
+      // restore 机制——react-dom 在 change 事件收尾无条件把 DOM checked 写回已提交
+      // state 值（已核 react-dom 18.3 源码验证回弹 100% 成立），本地状态未翻转即回弹；
+      // catch 里的 setConfig((c) => ({ ...c })) 只是冗余防御（触发一次重渲染兜底），勿误删或误信它是关键
+      setMessage(`通知设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
+    } finally {
+      setNotifBusy(false);
+    }
+  };
+
+  /** 发送测试通知：桌面端 API 无法检测投递失败与权限拒绝（后端无条件返回成功），
+   *  链路是否真正打通只能由用户亲眼看一次通知来确认。 */
+  const [testNotifyBusy, setTestNotifyBusy] = useState(false);
+  const sendTestNotification = async () => {
+    setTestNotifyBusy(true);
+    try {
+      await invoke('send_test_notification');
+    } catch (e) {
+      // 失败不静默：走与 handleSave 同一 toast 通道
+      setMessage(`测试通知发送失败: ${e}`);
+    } finally {
+      setTestNotifyBusy(false);
     }
   };
 
@@ -385,6 +425,38 @@ function Settings({ onBack }: SettingsProps) {
             )}
             <span className="update-hint">
               开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
+            </span>
+          </div>
+        </div>
+
+        {/* 低余额通知 */}
+        <div className="settings-section">
+          <h3>低余额通知</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">余额/配额告警恶化时弹系统通知</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.notifications_enabled}
+                  disabled={notifBusy}
+                  onChange={(e) => applyNotificationEnabled(e.target.checked)}
+                />
+              </label>
+            </div>
+            <div className="update-row">
+              <span className="update-row-label">验证通知链路是否打通</span>
+              <button
+                className="cancel-btn"
+                onClick={sendTestNotification}
+                disabled={testNotifyBusy}
+              >
+                {testNotifyBusy ? '发送中...' : '发送测试通知'}
+              </button>
+            </div>
+            <span className="update-hint">
+              开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
+              能否收到取决于系统通知权限（设置 → 通知），建议用测试通知自证。
             </span>
           </div>
         </div>

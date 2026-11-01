@@ -478,6 +478,9 @@ async fn poll_providers(
 
     // 推送给前端
     let _ = app_handle.emit("usage-updated", &summary);
+
+    // 低余额主动通知收口：告警等级恶化时弹系统通知（迁移判定防重复，见 notification.rs）
+    crate::notification::on_summary_refreshed(app_handle, cfg.notifications_enabled, &summary);
 }
 
 async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {

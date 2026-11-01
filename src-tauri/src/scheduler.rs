@@ -382,10 +382,10 @@ async fn poll_providers(
             .filter(|a| !a.trim().is_empty())
             .unwrap_or_else(|| providers::display_name(&provider_cfg.name).to_string());
 
-        // Codex / Claude Code / Kimi Code 无需 API Key（凭证从 CLI 配置文件读取），跳过空 key 检查
+        // Codex / Claude Code / Kimi Code / Qoder 无需 API Key（凭证从 CLI/客户端配置读取），跳过空 key 检查
         let needs_api_key = !matches!(
             provider_cfg.name.as_str(),
-            "Codex" | "Claude Code" | "Kimi Code"
+            "Codex" | "Claude Code" | "Kimi Code" | "Qoder"
         );
         if !provider_cfg.enabled || (needs_api_key && provider_cfg.api_key.is_empty()) {
             provider_statuses.push(ProviderStatus {

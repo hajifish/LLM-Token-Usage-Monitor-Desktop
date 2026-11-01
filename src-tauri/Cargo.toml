@@ -42,6 +42,13 @@ tray-icon = "0.24"
 zeroize = "1"
 # 用户主目录解析（Codex/Claude Code CLI 凭证路径）
 dirs = "7"
+# Qoder 客户端本地凭据解密：auth.v1.dat = "v10" + AES-128-CBC（IV=16 空格），
+# 密钥 = PBKDF2-SHA1(钥匙串 "<App> Safe Storage", "saltysalt", 1003 轮)（均纯 Rust 实现）
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = "0.12"
+hmac = "0.12"
+sha1 = "0.10"
 
 # Windows 机器指纹来源：注册表 MachineGuid
 [target.'cfg(target_os = "windows")'.dependencies]

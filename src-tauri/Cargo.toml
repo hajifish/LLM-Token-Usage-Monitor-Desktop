@@ -54,6 +54,24 @@ sha1 = "0.10"
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.56"
 
+# 托盘菜单文本测量：muda 未暴露 NSMenuItem 原生句柄，无法设置 attributedTitle/右制表位，
+# 只能用菜单字体量宽度后以空格把「值」补到统一右边界（见 menu_align.rs）
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSFont",
+    "NSStringDrawing",
+    "NSAttributedString",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSDictionary",
+    "NSAttributedString",
+] }
+
 [profile.release]
 lto = true
 codegen-units = 1

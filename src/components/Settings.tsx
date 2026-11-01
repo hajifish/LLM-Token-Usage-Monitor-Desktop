@@ -21,8 +21,16 @@ const PROVIDER_OPTIONS = [
   { value: 'Qoder', label: 'Qoder' },
 ];
 
-/** 无需用户配置 API Key，凭证从 CLI 配置文件自动读取的供应商类型。 */
-const CLI_OAUTH_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
+/** 无需用户配置 API Key，凭证从本机 CLI / 桌面客户端自动读取的供应商类型。 */
+const KEYLESS_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
+
+/**
+ * 是否 macOS。Qoder 的本地凭据读取（客户端 auth.v1.dat + 钥匙串解密）仅 macOS 支持，
+ * 其他平台该路径必然失败，需回退为 PAT 输入（#88）。用 navigator.platform / userAgent
+ * 做最小侵入探测，不引入 Tauri 插件。
+ */
+const IS_MAC =
+  /Mac/i.test(navigator.platform || '') || /Mac OS X/i.test(navigator.userAgent);
 
 /** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
 const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';
@@ -439,7 +447,7 @@ function Settings({ onBack }: SettingsProps) {
                   value={p.alias || ''}
                   onChange={(e) => updateProvider(i, 'alias', e.target.value)}
                 />
-                {CLI_OAUTH_PROVIDERS.has(p.name) ? (
+                {KEYLESS_PROVIDERS.has(p.name) && (p.name !== 'Qoder' || IS_MAC) ? (
                   <span className="ds-hint">
                     {p.name === 'Codex'
                       ? '自动从 ~/.codex/auth.json 读取凭证'
@@ -450,12 +458,19 @@ function Settings({ onBack }: SettingsProps) {
                           : '自动从 ~/.kimi-code/config.toml 读取凭证'}
                   </span>
                 ) : (
-                  <input
-                    type="password"
-                    placeholder="API Key"
-                    value={p.api_key}
-                    onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
-                  />
+                  <>
+                    <input
+                      type="password"
+                      placeholder="API Key"
+                      value={p.api_key}
+                      onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
+                    />
+                    {p.name === 'Qoder' && (
+                      <span className="ds-hint">
+                        本地凭据读取暂仅支持 macOS，可填写 PAT 作为凭据来源
+                      </span>
+                    )}
+                  </>
                 )}
                 {(p.name === 'OpenAI' || p.name === 'Anthropic') && (
                   <span className="ds-hint">需组织管理员密钥（Admin Key）</span>

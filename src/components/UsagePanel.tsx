@@ -63,7 +63,7 @@ function QuotaRow({ q }: { q: QuotaInfo }) {
           {q.plan_label && <span className="quota-plan-tag">{q.plan_label}</span>}
           {q.name}
         </span>
-        <span className="quota-pct">{q.remaining_percent.toFixed(0)}%</span>
+        <span className="quota-pct">{pct.toFixed(0)}%</span>
       </div>
       <div className="quota-row-bottom">
         <span className={`quota-meter ${meterClass}`}>
@@ -142,7 +142,10 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
         )}
 
         {/* Quota infos: name + percent, then mini meter + reset time */}
-        {quota_infos && quota_infos.map((q: QuotaInfo) => <QuotaRow key={q.name} q={q} />)}
+        {quota_infos &&
+          quota_infos.map((q: QuotaInfo, index: number) => (
+            <QuotaRow key={`${q.plan_label ?? ''}-${q.name}-${index}`} q={q} />
+          ))}
 
         {/* Nothing to show (e.g. API key accepted but no data yet) */}
         {!balance && !(usage && usage.total_tokens > 0) && !quota_infos?.length && (
@@ -187,12 +190,24 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
   // Disabled providers are managed in Settings; keep the main view focused on active ones.
   const visibleProviders = summary ? summary.providers.filter((p) => p.enabled) : [];
 
-  if (!summary || visibleProviders.length === 0) {
+  if (!summary || summary.providers.length === 0) {
+    // 真正零配置才显示添加指引
     return (
       <div className="usage-panel empty">
         <div className="empty-icon">+</div>
         <p className="empty-title">暂无服务商</p>
         <p className="empty-hint">请前往设置添加 API Key</p>
+      </div>
+    );
+  }
+
+  if (visibleProviders.length === 0) {
+    // 有配置但全部禁用：不能误导为「未配置」
+    return (
+      <div className="usage-panel empty">
+        <div className="empty-icon">–</div>
+        <p className="empty-title">所有供应商已禁用</p>
+        <p className="empty-hint">可在设置中启用</p>
       </div>
     );
   }

@@ -62,6 +62,9 @@ export function useFrozenBackground(): FrozenBackgroundState {
           const url = await buildUrl();
           await preload(url);
           if (!alive) return;
+          // mode 必须与配置同步：开关 checked 读的是 mode，漏同步会显示「跟随系统」
+          // 而背景实际已固定（重启后开关与实际模式相反）
+          setModeState('frozen');
           setImageUrl(url);
         } catch {
           if (alive) setLoadFailed(true);

@@ -454,7 +454,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 #[cfg(test)]
 mod tray_title_tests {
     use super::*;
-    use crate::models::{AppConfig, BalanceData, ProviderConfig};
+    use crate::models::{AppConfig, BackgroundMode, BalanceData, ProviderConfig};
 
     fn balance(v: f64, currency: &str) -> BalanceData {
         BalanceData {
@@ -528,6 +528,7 @@ mod tray_title_tests {
             auto_check_update: true,
             tray_text_enabled: true,
             notifications_enabled: true,
+            background_mode: BackgroundMode::default(),
         }
     }
 

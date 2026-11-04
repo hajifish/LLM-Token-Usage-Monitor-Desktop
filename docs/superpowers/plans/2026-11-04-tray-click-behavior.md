@@ -33,7 +33,7 @@
 - Consumes: 现有 `config::load`、托盘 id `"main_tray"`、config state `Arc<RwLock<AppConfig>>`。
 - Produces: `apply_tray_click_behavior(app: AppHandle, config_state: State<Arc<RwLock<AppConfig>>>) -> Result<(), String>`（Task 2 前端在 save_config 后 invoke）；`AppConfig.tray_click_opens_window: bool`（serde 反序列化口径，Task 2 的 types.ts 与之一致）。
 
-- [ ] **Step 1: models.rs 加字段**
+- [x] **Step 1: models.rs 加字段**
 
 `AppConfig` 结构体（现 58-72 行区域）末尾追加（紧跟 `notifications_enabled` 之后）：
 
@@ -44,7 +44,7 @@
     pub tray_click_opens_window: bool,
 ```
 
-- [ ] **Step 2: models.rs 加 serde 默认值测试**
+- [x] **Step 2: models.rs 加 serde 默认值测试**
 
 在 models.rs 任一现有 `#[cfg(test)]` 模块中（176/191/208 行处任选其一）追加：
 
@@ -63,7 +63,7 @@
 
 若该测试模块未导入 `serde_json`，确认 models.rs 测试模块既有用法的同款路径（仓库其余测试已直接用 `serde_json::from_str`，无需新增依赖）。
 
-- [ ] **Step 3: tray.rs——create_tray 签名 + builder + 左键打开分支**
+- [x] **Step 3: tray.rs——create_tray 签名 + builder + 左键打开分支**
 
 3a. 签名（现 386 行）：
 
@@ -116,7 +116,7 @@ pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<(
 
 3c. 同文件 `#[cfg(test)] mod tray_title_tests`（454 行起）不需要改动；若有编译错误按 clippy 输出修正，不得改测试断言语义。
 
-- [ ] **Step 4: commands.rs 新命令**
+- [x] **Step 4: commands.rs 新命令**
 
 文件顶部确认导入（现有：`use crate::models::{AppConfig, UsageSummary}; use std::sync::Arc; use tauri::AppHandle; use tokio::sync::{Notify, RwLock};`），需补一行（若尚无）：
 
@@ -144,7 +144,7 @@ pub async fn apply_tray_click_behavior(
 }
 ```
 
-- [ ] **Step 5: lib.rs——setup 重排 + 注册命令**
+- [x] **Step 5: lib.rs——setup 重排 + 注册命令**
 
 5a. setup 块（现 52-54 行）把 `config::load` 上移并传参：
 
@@ -158,12 +158,12 @@ pub async fn apply_tray_click_behavior(
 
 5b. 命令导入（现 18 行 use 列表）加 `apply_tray_click_behavior`；`generate_handler!` 列表（现 84-94 行）在 `trigger_refresh,` 之后加一行 `apply_tray_click_behavior,`。
 
-- [ ] **Step 6: Rust 验证门**
+- [x] **Step 6: Rust 验证门**
 
 Run（在 `src-tauri/` 下）：`cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
 Expected: 三者全部通过（新增测试在内全部 green）。fmt 先写后查可以接受，但提交前必须再跑一次 `cargo fmt --check` 确认干净。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src-tauri/src/models.rs src-tauri/src/lib.rs src-tauri/src/tray.rs src-tauri/src/commands.rs
@@ -194,7 +194,7 @@ EOF
 - Consumes: Task 1 的 `apply_tray_click_behavior` 命令与 `tray_click_opens_window` 字段口径（boolean，snake_case）。
 - Produces: 无下游消费。
 
-- [ ] **Step 1: types.ts 加字段**
+- [x] **Step 1: types.ts 加字段**
 
 `AppConfig`（现 62-71 行）末尾追加：
 
@@ -203,7 +203,7 @@ EOF
   tray_click_opens_window: boolean;
 ```
 
-- [ ] **Step 2: Settings.tsx 加即时生效函数**
+- [x] **Step 2: Settings.tsx 加即时生效函数**
 
 在 `sendTestNotification` 函数之后追加（与 applyNotificationEnabled 同模式）：
 
@@ -231,7 +231,7 @@ EOF
   };
 ```
 
-- [ ] **Step 3: Settings.tsx 加开关行**
+- [x] **Step 3: Settings.tsx 加开关行**
 
 状态栏显示区块（第一个 `settings-section`）内，现有 `tray-display-card` 之后、区块闭合之前新增独立卡片：
 
@@ -255,12 +255,12 @@ EOF
           </div>
 ```
 
-- [ ] **Step 4: 前端验证门**
+- [x] **Step 4: 前端验证门**
 
 Run: `npm run build && npm run lint && npm run format:check`
 Expected: 全部零错误退出。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/types.ts src/components/Settings.tsx
@@ -285,7 +285,7 @@ EOF
 - Consumes: Task 1-2 全部产出。tauri dev 检测到 Rust 变更会自动重编译并重启应用；前端走 HMR。
 - Produces: 验收结论。
 
-- [ ] **Step 1: 静态门复核**
+- [x] **Step 1: 静态门复核**
 
 Run: `cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` 和 `npm run build && npm run lint && npm run format:check`
 Expected: 全部零错误。

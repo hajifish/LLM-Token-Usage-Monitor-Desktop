@@ -31,7 +31,7 @@
 - Consumes: 无（零依赖模块，同 `src/types.ts` 风格）
 - Produces: `PROVIDER_OPTIONS: { value: string; label: string }[]`、`providerLabel(name: string): string`、`KEYLESS_PROVIDERS: Set<string>`、`IS_MAC: boolean` —— Task 2 的 Providers.tsx 与精简后的 Settings.tsx 都从这里导入。
 
-- [ ] **Step 1: 创建 `src/providerMeta.ts`**
+- [x] **Step 1: 创建 `src/providerMeta.ts`**
 
 内容整块如下（注释从 Settings.tsx 原样迁出，口径提醒必须保留）：
 
@@ -74,7 +74,7 @@ export function providerLabel(name: string): string {
 }
 ```
 
-- [ ] **Step 2: Settings.tsx 改为导入**
+- [x] **Step 2: Settings.tsx 改为导入**
 
 删除 Settings.tsx 中以下三段定义（现位于文件头部 12–34 行区域）：
 1. `const PROVIDER_OPTIONS = [...]`（含其上方「新增类型时同步…」注释）
@@ -89,12 +89,12 @@ import { IS_MAC, KEYLESS_PROVIDERS, PROVIDER_OPTIONS, providerLabel } from '../p
 
 注意：KEYLESS_PROVIDERS / IS_MAC 此刻仍被 Settings.tsx 的供应商渲染分支使用，不可漏导入；`providerLabel` 被托盘列表与别名 placeholder 使用。
 
-- [ ] **Step 3: 构建验证**
+- [x] **Step 3: 构建验证**
 
 Run: `npm run build && npm run lint && npm run format:check`
 Expected: 三者全部零错误退出（纯重构，无行为变化）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/providerMeta.ts src/components/Settings.tsx
@@ -120,7 +120,7 @@ EOF
 - Consumes: Task 1 的 `providerMeta` 四个导出；Tauri 命令 `get_config` / `save_config` / `get_config_health`（已存在，Rust 侧不动）；类型 `AppConfig` / `ConfigHealth` / `ProviderConfig`（`src/types.ts`）。
 - Produces: `export default function Providers({ onBack }: { onBack: () => void })` —— Task 4 的 App.tsx 以 `<Providers onBack={() => setView('usage')} />` 挂载。本任务组件尚未被任何文件引用（App 接线在 Task 4），独立成任务是为了评审粒度：整页逻辑先行落地。
 
-- [ ] **Step 1: 创建 `src/components/Providers.tsx`**
+- [x] **Step 1: 创建 `src/components/Providers.tsx`**
 
 完整文件如下。来源说明：横幅样式常量 / 健康状态拉取 / 供应商卡片渲染从 Settings.tsx **原样迁入**（保持既有注释），`handleSave` 是唯一语义改动（反向合并，spec「数据流与字段所有权」节）：
 
@@ -506,12 +506,12 @@ function Providers({ onBack }: ProvidersProps) {
 export default Providers;
 ```
 
-- [ ] **Step 2: 构建验证**
+- [x] **Step 2: 构建验证**
 
 Run: `npm run build && npm run lint && npm run format:check`
 Expected: 全部零错误退出。组件尚未被引用，tsc 不报未使用（exported module 无 unused 警告）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/components/Providers.tsx
@@ -538,7 +538,7 @@ EOF
 - Consumes: Task 1 的 `providerLabel`（托盘供应商列表显示名）；Tauri 命令 `get_config` / `save_config` / `send_test_notification`。
 - Produces: `export default function Settings({ onBack }: { onBack: () => void })` —— 对 App.tsx 的接口不变（props 签名原样），本任务不影响 App.tsx。
 
-- [ ] **Step 1: 改写 Settings.tsx**
+- [x] **Step 1: 改写 Settings.tsx**
 
 删除：健康横幅（BANNER 常量、`basename`、`health` 状态、`refreshHealth`、`dismissed`/`dismiss`、`MIGRATED_NOTICE_KEY` 与 localStorage 逻辑）、服务商区块（渲染 + `updateProvider` / `addProvider` / `handleProviderNameChange` / `removeProvider` / `deletingIndex`）、`handleSave` / `saving` /「保存」按钮、`PROVIDER_OPTIONS` / `KEYLESS_PROVIDERS` / `IS_MAC` 导入（本页不再用）。
 
@@ -770,12 +770,12 @@ export default Settings;
 
 注意保留 `applyTrayDisplay` 的 `patch.providerName` 参数与 `providerKey` 定位逻辑原样——那是既有的双账号防错位机制，本次不重构。
 
-- [ ] **Step 2: 构建验证**
+- [x] **Step 2: 构建验证**
 
 Run: `npm run build && npm run lint && npm run format:check`
 Expected: 全部零错误退出。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/components/Settings.tsx
@@ -801,7 +801,7 @@ EOF
 - Consumes: Task 2 的 `export default Providers`（`<Providers onBack={() => setView('usage')} />`，返回主页）。
 - Produces: 无下游消费。
 
-- [ ] **Step 1: 扩展 view 类型并导入 Providers**
+- [x] **Step 1: 扩展 view 类型并导入 Providers**
 
 ```tsx
 import Providers from './components/Providers';
@@ -811,7 +811,7 @@ import Providers from './components/Providers';
 const [view, setView] = useState<'usage' | 'settings' | 'providers'>('usage');
 ```
 
-- [ ] **Step 2: header-actions 中刷新按钮与设置图标之间插入「+」按钮**
+- [x] **Step 2: header-actions 中刷新按钮与设置图标之间插入「+」按钮**
 
 在 `</button>`（刷新按钮结束，现 70 行）与设置图标 `<button className="settings-icon-btn" ...>` 之间插入（复用 `settings-icon-btn` 类，spec 决策；加号 SVG 同 feather 线条风格，尺寸与设置图标一致 18×18）：
 
@@ -837,7 +837,7 @@ const [view, setView] = useState<'usage' | 'settings' | 'providers'>('usage');
                 </button>
 ```
 
-- [ ] **Step 3: 视图渲染分支**
+- [x] **Step 3: 视图渲染分支**
 
 将现三元表达式：
 
@@ -859,12 +859,12 @@ const [view, setView] = useState<'usage' | 'settings' | 'providers'>('usage');
 
 `navigate` 事件监听（21–31 行）不动——后端目前从不发送该事件，保持现状。
 
-- [ ] **Step 4: 构建验证**
+- [x] **Step 4: 构建验证**
 
 Run: `npm run build && npm run lint && npm run format:check`
 Expected: 全部零错误退出。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/App.tsx
@@ -889,7 +889,7 @@ EOF
 - Consumes: Task 1–4 全部产出。
 - Produces: 验收结论（走查清单全绿 = 可以合回 develop）。
 
-- [ ] **Step 1: 静态质量门**
+- [x] **Step 1: 静态质量门**
 
 Run: `npm run build && npm run lint && npm run format:check`
 Expected: 全部零错误退出（Task 4 后的最终态复核）。

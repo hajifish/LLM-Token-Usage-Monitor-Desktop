@@ -2,7 +2,7 @@
 
 - 日期：2026-11-04
 - 分支：`feature/provider-config-page`
-- 状态：已确认设计（待实施）
+- 状态：已实施（2026-11-04，分支 `feature/provider-config-page`，整分支终审通过；待 `npm run tauri dev` 人工走查验收后合回 develop）
 
 ## 背景与目标
 

@@ -34,6 +34,8 @@
   flex-direction: column;
   height: 100vh;
   background: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 /* ===== Header with settings icon ===== */
@@ -890,4 +892,26 @@ input:focus, select:focus {
   pointer-events: none;
   user-select: none;
   z-index: 10;
+}
+
+/* ===== 背景固化：固定背景层与截取捕获态 ===== */
+
+/* 固定背景层：铺截取的「半透明背景」图（含材质观感），压在窗口材质之上、
+   全部内容之下。截图像素已含窗口圆角外的桌背内容，故按窗口圆角裁掉，
+   保持今天的透明圆角观感（半径与实机窗口圆角对齐，走查校准）。 */
+.background-frozen {
+  position: fixed;
+  inset: 0;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 截取捕获态：隐藏全部页面内容（含本背景层），仅露出窗口材质供截屏。
+   class 由 useFrozenBackground 挂在 <html> 上。 */
+html.capture-blank #root {
+  visibility: hidden;
 }

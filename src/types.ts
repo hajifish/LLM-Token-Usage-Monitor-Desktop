@@ -70,6 +70,8 @@ export interface AppConfig {
   notifications_enabled: boolean;
   /** 点击菜单栏图标直接打开主页（false = 点击显示详情菜单，默认现状）。 */
   tray_click_opens_window: boolean;
+  /** 背景模式：frozen=固定背景（内置默认背景图，默认）；follow=跟随系统半透明。 */
+  background_mode: 'frozen' | 'follow';
 }
 
 /** 应用内更新的阶段 —— 与 Rust `updater::UpdatePhase` 严格一致（snake_case）。 */

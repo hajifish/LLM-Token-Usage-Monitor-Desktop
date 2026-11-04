@@ -615,7 +615,18 @@ input:focus, select:focus {
   gap: 6px;
 }
 
-.provider-config-header select { flex: 1; }
+/* 下拉/别名定宽后，启用开关与删除按钮仍锚定行尾（空隙留在中间） */
+.provider-config-header .toggle { margin-left: auto; }
+
+/* 供应商下拉与别名同行：下拉保持别名的 1.5 倍宽（240px），不占满整行 */
+.provider-config-header select { flex: 0 0 240px; }
+
+/* 别名紧挨下拉，固定窄宽；留空回退供应商默认名 */
+.provider-config-header .alias-input { flex: 0 0 160px; }
+
+/* 原生 select 渲染高度比文本输入矮一截，统一高度对齐 */
+.provider-config-header select,
+.provider-config-header .alias-input { height: 30px; }
 
 .toggle {
   display: flex;
@@ -833,6 +844,13 @@ input:focus, select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* update-row 右端动作编组（如「发送测试通知」按钮 + 开关），整体靠右 */
+.update-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .update-row-label {

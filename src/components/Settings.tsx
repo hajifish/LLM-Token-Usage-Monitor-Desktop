@@ -401,7 +401,6 @@ function Settings({ onBack }: SettingsProps) {
 
         {/* 状态栏显示 */}
         <div className="settings-section">
-          <h3>状态栏显示</h3>
           <div className="tray-display-card">
             <div className="update-row">
               <span className="update-row-label">在菜单栏图标旁显示指标文字</span>
@@ -448,39 +447,35 @@ function Settings({ onBack }: SettingsProps) {
 
         {/* 低余额通知 */}
         <div className="settings-section">
-          <h3>低余额通知</h3>
           <div className="tray-display-card">
             <div className="update-row">
               <span className="update-row-label">余额/配额告警恶化时弹系统通知</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={config.notifications_enabled}
-                  disabled={notifBusy}
-                  onChange={(e) => applyNotificationEnabled(e.target.checked)}
-                />
-              </label>
-            </div>
-            <div className="update-row">
-              <span className="update-row-label">验证通知链路是否打通</span>
-              <button
-                className="cancel-btn"
-                onClick={sendTestNotification}
-                disabled={testNotifyBusy}
-              >
-                {testNotifyBusy ? '发送中...' : '发送测试通知'}
-              </button>
+              <div className="update-row-actions">
+                <button
+                  className="cancel-btn"
+                  onClick={sendTestNotification}
+                  disabled={testNotifyBusy}
+                >
+                  {testNotifyBusy ? '发送中...' : '发送测试通知'}
+                </button>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.notifications_enabled}
+                    disabled={notifBusy}
+                    onChange={(e) => applyNotificationEnabled(e.target.checked)}
+                  />
+                </label>
+              </div>
             </div>
             <span className="update-hint">
-              开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
-              能否收到取决于系统通知权限（设置 → 通知），建议用测试通知自证。
+              开关即时生效。告警恶化时提醒一次，恢复后再次恶化会再提醒；收不到请检查系统通知权限。
             </span>
           </div>
         </div>
 
         {/* 服务商配置 */}
         <div className="settings-section">
-          <h3>服务商</h3>
           {config.providers.map((p, i) => (
             <div key={`${p.name}-${p.alias || i}`} className="provider-config">
               <div className="provider-config-header">
@@ -494,6 +489,13 @@ function Settings({ onBack }: SettingsProps) {
                     </option>
                   ))}
                 </select>
+                <input
+                  className="alias-input"
+                  type="text"
+                  placeholder={`别名（默认「${providerLabel(p.name)}」）`}
+                  value={p.alias || ''}
+                  onChange={(e) => updateProvider(i, 'alias', e.target.value)}
+                />
                 <label className="toggle">
                   <input
                     type="checkbox"
@@ -521,12 +523,6 @@ function Settings({ onBack }: SettingsProps) {
                 )}
               </div>
               <div className="provider-fields">
-                <input
-                  type="text"
-                  placeholder={`别名（默认「${providerLabel(p.name)}」）`}
-                  value={p.alias || ''}
-                  onChange={(e) => updateProvider(i, 'alias', e.target.value)}
-                />
                 {p.name === 'Qoder' ? (
                   // Qoder 双认证路径（qoder.rs）：api_key 留空 = 本机客户端凭据（主路径），
                   // 填写 PAT = 令牌兜底。所有平台都放行 PAT 输入：macOS 上客户端未登录或

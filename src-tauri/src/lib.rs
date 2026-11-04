@@ -80,6 +80,8 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
+                // 窗口转入隐藏：打开主页模式下点击托盘应回到「打开主页」分支
+                crate::tray::sync_tray_click_flag(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![

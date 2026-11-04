@@ -186,32 +186,30 @@ function Settings({ onBack }: SettingsProps) {
                 />
               </label>
             </div>
-            {config.tray_text_enabled && (
-              <div className="tray-provider-list">
-                {config.providers
-                  .map((p, i) => ({ p, i }))
-                  .filter(({ p }) => p.enabled)
-                  .map(({ p, i }) => (
-                    <label key={`${p.name}-${p.alias || i}`} className="tray-provider-row">
-                      <input
-                        type="checkbox"
-                        checked={p.show_in_tray}
-                        disabled={trayBusy}
-                        onChange={(e) =>
-                          applyTrayDisplay({
-                            providerIndex: i,
-                            providerName: p.name,
-                            value: e.target.checked,
-                          })
-                        }
-                      />
-                      <span>{p.alias?.trim() || providerLabel(p.name)}</span>
-                    </label>
-                  ))}
-              </div>
-            )}
+            <div className={`tray-provider-list${config.tray_text_enabled ? '' : ' is-disabled'}`}>
+              {config.providers
+                .map((p, i) => ({ p, i }))
+                .filter(({ p }) => p.enabled)
+                .map(({ p, i }) => (
+                  <label key={`${p.name}-${p.alias || i}`} className="tray-provider-row">
+                    <input
+                      type="checkbox"
+                      checked={p.show_in_tray}
+                      disabled={trayBusy || !config.tray_text_enabled}
+                      onChange={(e) =>
+                        applyTrayDisplay({
+                          providerIndex: i,
+                          providerName: p.name,
+                          value: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{p.alias?.trim() || providerLabel(p.name)}</span>
+                  </label>
+                ))}
+            </div>
             <span className="update-hint">
-              开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
+              开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标，下方供应商选项随之禁用仅供预览；也可对单个服务商关闭常显。
             </span>
           </div>
           {/* 点击行为：左键直接打开主页（右键始终弹详情菜单） */}

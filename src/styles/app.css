@@ -821,6 +821,20 @@ input:focus, select:focus {
   border: 1px solid var(--system-separator);
 }
 
+/* 同区块内两张托盘卡片之间的留白 */
+.settings-section .tray-display-card + .tray-display-card {
+  margin-top: 12px;
+}
+
+/* 总开关关闭时供应商列表禁用仅供预览 */
+.tray-provider-list.is-disabled {
+  opacity: 0.45;
+}
+
+.tray-provider-list.is-disabled .tray-provider-row {
+  cursor: default;
+}
+
 .tray-provider-list {
   display: flex;
   flex-wrap: wrap;

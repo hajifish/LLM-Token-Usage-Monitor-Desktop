@@ -165,6 +165,15 @@ pub async fn capture_background() -> Result<String, String> {
     Err("固定背景仅支持 macOS".into())
 }
 
+/// 运行时切换窗口材质（固定背景 ↔ 跟随系统）。前端在配置落盘、铺图完成后调用。
+#[tauri::command]
+pub async fn apply_window_effects(
+    window: tauri::WebviewWindow,
+    mode: BackgroundMode,
+) -> Result<(), String> {
+    apply_effects(&window, mode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

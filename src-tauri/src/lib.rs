@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
-use background::capture_background;
+use background::{apply_window_effects, capture_background};
 use commands::{
     get_config, get_config_health, get_usage, save_config, send_test_notification, trigger_refresh,
 };
@@ -54,6 +54,8 @@ pub fn run() {
         .setup(|app| {
             tray::create_tray(app.handle())?;
             let (app_config, config_health) = config::load(app.handle());
+            // app_config 随即被 move 进 RwLock；背景模式为 Copy，先取出副本供启动初始化
+            let background_mode = app_config.background_mode;
             let config_state = Arc::new(RwLock::new(app_config));
             let summary_state = Arc::new(RwLock::new(UsageSummary::default()));
             let health_state = Arc::new(RwLock::new(config_health));
@@ -73,6 +75,11 @@ pub fn run() {
             );
             sched.start();
             updater::spawn_auto_check(app.handle().clone(), config_state);
+            // 背景固化：启动时若为固定模式且存量图在，直接移除窗口材质（前端随后铺图）；
+            // 失败仅告警不阻断启动（最坏表现为材质残留，观感回退半透明）
+            if let Err(e) = background::init_window_effects(app.handle(), background_mode) {
+                log::warn!("背景固化: 启动材质初始化失败: {}", e);
+            }
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             Ok(())
@@ -91,6 +98,7 @@ pub fn run() {
             send_test_notification,
             trigger_refresh,
             capture_background,
+            apply_window_effects,
             updater::get_update_status,
             updater::check_update,
             updater::download_update,

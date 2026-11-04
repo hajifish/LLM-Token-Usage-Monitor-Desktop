@@ -59,6 +59,8 @@ pub async fn apply_tray_click_behavior(
     if let Some(tray) = app.tray_by_id("main_tray") {
         tray.set_show_menu_on_left_click(!opens)
             .map_err(|e| format!("托盘点击行为设置失败: {e}"))?;
+    } else {
+        return Err("托盘句柄缺失（main_tray），无法应用点击行为".into());
     }
     Ok(())
 }

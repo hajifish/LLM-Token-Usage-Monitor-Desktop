@@ -431,7 +431,7 @@ pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<(
             }
             // 「点击直接打开主页」模式：左键显示并聚焦主窗口；右键始终弹详情菜单
             // （show_menu_on_left_click(false) 的标准语义）。配置实时读取：
-            // 设置页切换即时生效，无需重建托盘；state 不可用时回退现状（弹菜单）。
+            // 设置页切换即时生效，无需重建托盘；state 不可用时仅跳过打开主窗口（菜单弹出与否由启动时的 builder 标志决定）。
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
                 button_state: tauri::tray::MouseButtonState::Up,

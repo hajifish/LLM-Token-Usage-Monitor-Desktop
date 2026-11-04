@@ -109,3 +109,14 @@ Rust 单测（沿用现有 `cargo test` 基建）：
 ## 与在途分支的关系
 
 `feature/provider-config-page` 同样改动 `Settings.tsx` / `models.rs` / `types.ts` 且尚未合回 develop。两功能无逻辑依赖；先合并者为准，后合并的分支需 rebase 解决设置页区块与配置字段的合并冲突（本分支新增区块夹在「低余额通知」与「服务商」之间，provider-config-page 会移除「服务商」区块，冲突范围小、语义清晰）。
+
+## 2026-11-05 修订：改为内置资产方案（用户决策）
+
+运行时截屏方案实施完成后，用户澄清真实需求：**开发期**截好一张干净的半透明背景图，随包内置为默认背景（`public/default-background.png`）；应用运行时不截屏、无屏幕录制权限。修订内容：
+
+- 默认模式改为 **frozen**（serde 默认值变更；显式保存过 follow 的旧配置不受影响）。
+- 删除 `capture_background` 命令、CG 权限 FFI、assetProtocol 配置、临时文件晋级链路及其单测；Cargo.toml 的 `protocol-asset` feature 同步移除。
+- 启动时序：启动时**不动材质**（follow/frozen 均保持 hudWindow 兜底观感），前端预加载并铺好内置图之后再经 `apply_window_effects` 移除材质——图覆盖在材质之上，移除瞬间无观感变化，加载期零闪透明。
+- 内置图截取方式（开发期一次性）：临时空窗补丁启动 dev 实例 → `screencapture -R<窗口区域>`（终端已有的权限，应用永不申请）→ 红绿灯按钮区域用邻近材质像素修补。
+- 「重新截取」语义删除：更换背景图属开发期资产替换，不再是运行时功能。
+- 原「错误处理」表中权限/截取失败/图缺失各分支随之消灭；仅保留 `apply_window_effects` 软失败提示。

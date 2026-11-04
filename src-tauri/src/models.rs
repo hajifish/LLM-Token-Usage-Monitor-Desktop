@@ -59,8 +59,8 @@ fn default_show_in_tray() -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum BackgroundMode {
-    #[default]
     Follow,
+    #[default]
     Frozen,
 }
 
@@ -312,14 +312,14 @@ mod background_mode_tests {
     use super::BackgroundMode;
 
     #[test]
-    fn defaults_to_follow_when_field_missing() {
+    fn defaults_to_frozen_when_field_missing() {
         #[derive(serde::Deserialize)]
         struct Partial {
             #[serde(default)]
             background_mode: BackgroundMode,
         }
         let parsed: Partial = serde_json::from_str("{}").expect("空对象应可解析");
-        assert_eq!(parsed.background_mode, BackgroundMode::Follow);
+        assert_eq!(parsed.background_mode, BackgroundMode::Frozen);
     }
 
     #[test]

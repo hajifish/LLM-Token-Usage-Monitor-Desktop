@@ -909,9 +909,3 @@ input:focus, select:focus {
   pointer-events: none;
   z-index: 0;
 }
-
-/* 截取捕获态：隐藏全部页面内容（含本背景层），仅露出窗口材质供截屏。
-   class 由 useFrozenBackground 挂在 <html> 上。 */
-html.capture-blank #root {
-  visibility: hidden;
-}

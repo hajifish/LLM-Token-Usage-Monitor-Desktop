@@ -68,6 +68,8 @@ export interface AppConfig {
   tray_text_enabled: boolean;
   /** 低余额主动系统通知：告警等级恶化时弹系统通知。 */
   notifications_enabled: boolean;
+  /** 背景模式：follow=跟随系统半透明（默认）；frozen=固定背景（截屏固化，仅 macOS）。 */
+  background_mode: 'follow' | 'frozen';
 }
 
 /** 应用内更新的阶段 —— 与 Rust `updater::UpdatePhase` 严格一致（snake_case）。 */

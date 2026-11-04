@@ -383,7 +383,7 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
     let _ = tray.set_icon(Some(img));
 }
 
-pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<()> {
     // 初始菜单：紧凑风格，scheduler 会动态替换为带供应商详情的完整菜单
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
@@ -418,15 +418,36 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main_tray")
         .icon(tray_icon)
         .icon_as_template(false) // 全彩图标，不启用模板模式
+        .show_menu_on_left_click(!click_opens_window) // 开启「点击打开主页」时左键不弹菜单（右键仍弹）
         .menu(&menu)
         .tooltip("Token Usage")
-        .on_tray_icon_event(|tray, _event| {
+        .on_tray_icon_event(|tray, event| {
             // 每次点击托盘图标时触发后台刷新，数据在下次打开菜单时可见。
             // macOS 系统行为：点击菜单项后菜单必然关闭，因此刷新由托盘图标点击触发，
             // 而非菜单项点击，避免用户期望"菜单保持打开看更新"的落差。
             let app = tray.app_handle();
             if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
                 notify.notify_one();
+            }
+            // 「点击直接打开主页」模式：左键显示并聚焦主窗口；右键始终弹详情菜单
+            // （show_menu_on_left_click(false) 的标准语义）。配置实时读取：
+            // 设置页切换即时生效，无需重建托盘；state 不可用时回退现状（弹菜单）。
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let opens = app
+                    .try_state::<std::sync::Arc<tokio::sync::RwLock<crate::models::AppConfig>>>()
+                    .and_then(|cfg| cfg.try_read().ok().map(|g| g.tray_click_opens_window))
+                    .unwrap_or(false);
+                if opens {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -528,6 +549,7 @@ mod tray_title_tests {
             auto_check_update: true,
             tray_text_enabled: true,
             notifications_enabled: true,
+            tray_click_opens_window: false,
         }
     }
 

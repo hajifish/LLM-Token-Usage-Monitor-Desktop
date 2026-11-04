@@ -47,6 +47,22 @@ pub async fn send_test_notification(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 应用托盘点击行为运行时开关：读配置状态并同步到持久 TrayIcon（id "main_tray"）。
+/// 设置页切换后调用，立即生效；托盘对象全程持久、每轮仅原地更新菜单内容，
+/// 故无需重建托盘。create_tray 的启动初值由 lib.rs setup 传入，两处口径一致。
+#[tauri::command]
+pub async fn apply_tray_click_behavior(
+    app: AppHandle,
+    config_state: tauri::State<'_, Arc<RwLock<AppConfig>>>,
+) -> Result<(), String> {
+    let opens = config_state.read().await.tray_click_opens_window;
+    if let Some(tray) = app.tray_by_id("main_tray") {
+        tray.set_show_menu_on_left_click(!opens)
+            .map_err(|e| format!("托盘点击行为设置失败: {e}"))?;
+    }
+    Ok(())
+}
+
 /// 统一的配置落盘入口：备份守卫 → 加密原子写入 → 写回内存态。
 ///
 /// `save_config` 与其他直改配置的路径共用，避免写入保护逻辑分叉。

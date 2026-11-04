@@ -69,6 +69,10 @@ pub struct AppConfig {
     /// 低余额主动系统通知：告警等级恶化时弹系统通知
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
+    /// 点击菜单栏图标直接打开主窗口（false = 点击显示详情菜单，默认现状；
+    /// 旧配置文件缺此字段由 serde default 兜底为 false）
+    #[serde(default)]
+    pub tray_click_opens_window: bool,
 }
 
 fn default_refresh_interval() -> u64 {
@@ -95,6 +99,7 @@ impl Default for AppConfig {
             auto_check_update: default_auto_check_update(),
             tray_text_enabled: default_tray_text_enabled(),
             notifications_enabled: default_notifications_enabled(),
+            tray_click_opens_window: false,
         }
     }
 }
@@ -202,6 +207,17 @@ mod notifications_default_tests {
             cfg.notifications_enabled,
             "缺省的 notifications_enabled 应默认为 true"
         );
+    }
+
+    #[test]
+    fn tray_click_opens_window_defaults_false() {
+        // 旧配置文件无此字段：反序列化兜底 false（= 点击弹详情菜单的现状）
+        let cfg: AppConfig = serde_json::from_str(r#"{"providers":[]}"#).unwrap();
+        assert!(!cfg.tray_click_opens_window);
+        // 显式值可解析
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"providers":[],"tray_click_opens_window":true}"#).unwrap();
+        assert!(cfg.tray_click_opens_window);
     }
 }
 

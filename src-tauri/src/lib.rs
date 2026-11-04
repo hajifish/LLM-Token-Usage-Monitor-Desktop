@@ -15,7 +15,8 @@ use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
 use commands::{
-    get_config, get_config_health, get_usage, save_config, send_test_notification, trigger_refresh,
+    apply_tray_click_behavior, get_config, get_config_health, get_usage, save_config,
+    send_test_notification, trigger_refresh,
 };
 use models::UsageSummary;
 use scheduler::Scheduler;
@@ -50,8 +51,8 @@ pub fn run() {
         // 应用内自动更新：端点与公钥在 tauri.conf.json 的 plugins.updater 中配置
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            tray::create_tray(app.handle())?;
             let (app_config, config_health) = config::load(app.handle());
+            tray::create_tray(app.handle(), app_config.tray_click_opens_window)?;
             let config_state = Arc::new(RwLock::new(app_config));
             let summary_state = Arc::new(RwLock::new(UsageSummary::default()));
             let health_state = Arc::new(RwLock::new(config_health));
@@ -88,6 +89,7 @@ pub fn run() {
             save_config,
             send_test_notification,
             trigger_refresh,
+            apply_tray_click_behavior,
             updater::get_update_status,
             updater::check_update,
             updater::download_update,

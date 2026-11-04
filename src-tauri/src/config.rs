@@ -557,6 +557,7 @@ mod tests {
             auto_check_update: true,
             tray_text_enabled: true,
             notifications_enabled: true,
+            tray_click_opens_window: false,
         }
     }
 

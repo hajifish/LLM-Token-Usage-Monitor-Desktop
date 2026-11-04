@@ -267,7 +267,9 @@ function Providers({ onBack }: ProvidersProps) {
         {/* 供应商配置（自设置页迁入，本页是唯一编辑入口） */}
         <div className="settings-section">
           {config.providers.map((p, i) => (
-            <div key={`${p.name}-${p.alias || i}`} className="provider-config">
+            // key 必须稳定：含 alias 时每敲一个字符 key 变化 → 整卡卸载重挂 →
+            // 输入框失焦、别名永远输不进去。行不重排（删除用 index 定位），索引即稳定键
+            <div key={i} className="provider-config">
               <div className="provider-config-header">
                 <select
                   value={p.name}

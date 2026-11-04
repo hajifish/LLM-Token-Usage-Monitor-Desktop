@@ -1,3 +1,4 @@
+mod background;
 mod commands;
 mod config;
 #[cfg(target_os = "macos")]

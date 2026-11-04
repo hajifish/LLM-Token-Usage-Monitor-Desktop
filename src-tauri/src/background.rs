@@ -83,6 +83,88 @@ pub fn init_window_effects(app: &tauri::AppHandle, mode: BackgroundMode) -> Resu
     Ok(())
 }
 
+/// CoreGraphics 屏幕录制权限 FFI（macOS 10.15+）。直接 extern 声明，不引新 crate。
+#[cfg(target_os = "macos")]
+mod screen_capture {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        pub fn CGPreflightScreenCaptureAccess() -> bool;
+        pub fn CGRequestScreenCaptureAccess() -> bool;
+    }
+}
+
+/// 截取当前窗口区域的「纯净半透明背景」（调用前前端已把全部内容
+/// `visibility: hidden`，窗口只剩 hudWindow 材质 × 桌面壁纸的合成观感），
+/// 校验后覆盖应用数据目录 `background.png`。仅 macOS。
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn capture_background(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<String, String> {
+    // SAFETY: 两个 CG 函数均为无副作用的权限查询/请求入口
+    unsafe {
+        if !screen_capture::CGPreflightScreenCaptureAccess() {
+            // 弹系统授权框；即便用户当场允许，本进程也要重启后才能截屏，
+            // 故直接报错引导重启，不继续截图
+            let _ = screen_capture::CGRequestScreenCaptureAccess();
+            return Err(
+                "需要屏幕录制权限：请在 系统设置 → 隐私与安全性 → 屏幕录制 中勾选本应用，\
+                 重启应用后再开启固定背景"
+                    .into(),
+            );
+        }
+    }
+
+    let pos = window
+        .outer_position()
+        .map_err(|e| format!("获取窗口位置失败: {e}"))?;
+    let size = window
+        .outer_size()
+        .map_err(|e| format!("获取窗口尺寸失败: {e}"))?;
+    let scale = window
+        .scale_factor()
+        .map_err(|e| format!("获取窗口缩放系数失败: {e}"))?;
+    let region = region_arg(pos.x, pos.y, size.width, size.height, scale);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("获取应用数据目录失败: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {e}"))?;
+        let final_path = dir.join(BACKGROUND_IMAGE);
+        let tmp_path = dir.join(format!("{BACKGROUND_IMAGE}.tmp"));
+
+        let status = std::process::Command::new("/usr/sbin/screencapture")
+            .args(["-x", &region, &tmp_path.to_string_lossy()])
+            .status()
+            .map_err(|e| format!("启动 screencapture 失败: {e}"))?;
+        if !status.success() {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!(
+                "截取失败（screencapture 退出码 {}），请重试",
+                status.code().unwrap_or(-1)
+            ));
+        }
+
+        // 校验通过才覆盖旧图；校验失败保留原背景图（promote_capture 已单测）
+        promote_capture(&tmp_path, &final_path)?;
+        log::info!("背景固化: 已保存 {}", final_path.display());
+        Ok(final_path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("截取任务异常: {e}"))?
+}
+
+/// 非 macOS：命令存在但直接报错（保证前端 invoke 不至于「命令不存在」，
+/// 也让 generate_handler 在三平台都能注册同名命令）。
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn capture_background() -> Result<String, String> {
+    Err("固定背景仅支持 macOS".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

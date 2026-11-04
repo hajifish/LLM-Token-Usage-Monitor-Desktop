@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
+use background::capture_background;
 use commands::{
     get_config, get_config_health, get_usage, save_config, send_test_notification, trigger_refresh,
 };
@@ -89,6 +90,7 @@ pub fn run() {
             save_config,
             send_test_notification,
             trigger_refresh,
+            capture_background,
             updater::get_update_status,
             updater::check_update,
             updater::download_update,

@@ -121,7 +121,14 @@ function App() {
         ) : view === 'settings' ? (
           <Settings onBack={() => setView('usage')} />
         ) : (
-          <Providers onBack={() => setView('usage')} />
+          <Providers
+            onBack={() => {
+              setView('usage');
+              // 保存触发的后端轮询有秒级网络延迟：返回主页即进入刷新态，
+              // 数据一到面板立即显示新供应商，避免「以为没加上」
+              refresh();
+            }}
+          />
         )}
         {appVersion && <div className="version-tag">v{appVersion}</div>}
       </div>

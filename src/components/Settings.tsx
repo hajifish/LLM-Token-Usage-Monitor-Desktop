@@ -113,12 +113,19 @@ function Settings({ onBack }: SettingsProps) {
   };
 
   /** 发送测试通知：桌面端 API 无法检测投递失败与权限拒绝（后端无条件返回成功），
-   *  链路是否真正打通只能由用户亲眼看一次通知来确认。 */
+   *  链路是否真正打通只能由用户亲眼看一次通知来确认。成功也给 toast 反馈：
+   *  让「点过按钮」这件事可见——dev 模式（tauri dev 未打包）通知归属终端/IDE
+   *  宿主应用，打包后才归属本应用，能否弹横幅取决于宿主的通知权限与专注模式。 */
   const [testNotifyBusy, setTestNotifyBusy] = useState(false);
   const sendTestNotification = async () => {
     setTestNotifyBusy(true);
     try {
       await invoke('send_test_notification');
+      setMessage(
+        import.meta.env.DEV
+          ? '测试通知已发出（dev 模式归属终端/IDE 宿主应用）；未收到请检查宿主的通知权限与专注模式'
+          : '测试通知已发出；未收到请检查本应用的通知权限与专注模式',
+      );
     } catch (e) {
       // 失败不静默：走 toast 通道
       setMessage(`测试通知发送失败: ${e}`);

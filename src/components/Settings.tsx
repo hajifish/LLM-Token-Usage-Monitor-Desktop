@@ -134,6 +134,28 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
+  /** 点击行为开关即时生效：读最新配置 → 仅改本字段 → 落盘 → 调命令同步托盘
+   *  运行时开关。与 applyTrayDisplay 同模式：不经保存按钮、后端写入成功才同步
+   *  本地状态；托盘侧 set_show_menu_on_left_click 立即生效，与每轮原地更新菜单
+   *  互不干扰。 */
+  const [trayClickBusy, setTrayClickBusy] = useState(false);
+  const applyTrayClickBehavior = async (value: boolean) => {
+    setTrayClickBusy(true);
+    try {
+      const fresh = await invoke<AppConfig>('get_config');
+      fresh.tray_click_opens_window = value;
+      await invoke('save_config', { newConfig: fresh });
+      await invoke('apply_tray_click_behavior');
+      setConfig((cur) => (cur ? { ...cur, tray_click_opens_window: value } : cur));
+    } catch (e) {
+      // 失败不静默：走 toast 通道，受控 checkbox 回弹真实值
+      setMessage(`点击行为设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
+    } finally {
+      setTrayClickBusy(false);
+    }
+  };
+
   if (!config) {
     return <div className="settings loading">加载中...</div>;
   }
@@ -190,6 +212,23 @@ function Settings({ onBack }: SettingsProps) {
             )}
             <span className="update-hint">
               开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
+            </span>
+          </div>
+          {/* 点击行为：左键直接打开主页（右键始终弹详情菜单） */}
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">点击菜单栏图标直接打开主页</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.tray_click_opens_window}
+                  disabled={trayClickBusy}
+                  onChange={(e) => applyTrayClickBehavior(e.target.checked)}
+                />
+              </label>
+            </div>
+            <span className="update-hint">
+              开启后左键点击图标直接打开主窗口，右键仍可打开详情菜单；关闭时点击显示详情菜单（默认）。开关即时生效。
             </span>
           </div>
         </div>

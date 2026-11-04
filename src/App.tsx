@@ -7,10 +7,12 @@ import UpdateNotice from './components/UpdateNotice';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
+import { useFrozenBackground } from './hooks/useFrozenBackground';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings'>('usage');
   const { summary, loading, refreshing, error, refresh } = useUsage();
+  const background = useFrozenBackground();
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,6 +34,12 @@ function App() {
 
   return (
     <ErrorBoundary>
+      {background.imageUrl && (
+        <div
+          className="background-frozen"
+          style={{ backgroundImage: `url(${background.imageUrl})` }}
+        />
+      )}
       <div className="app">
         {view === 'usage' ? (
           <div className="usage-view">
@@ -99,7 +107,7 @@ function App() {
             />
           </div>
         ) : (
-          <Settings onBack={() => setView('usage')} />
+          <Settings onBack={() => setView('usage')} background={background} />
         )}
         {appVersion && <div className="version-tag">v{appVersion}</div>}
       </div>

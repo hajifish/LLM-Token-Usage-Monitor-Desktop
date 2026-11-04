@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppConfig, ConfigHealth, ProviderConfig } from '../types';
+import type { FrozenBackgroundState } from '../hooks/useFrozenBackground';
 
 interface SettingsProps {
   onBack: () => void;
+  background: FrozenBackgroundState;
 }
 
 // 新增类型时同步 providers/mod.rs::ALL_PROVIDER_TYPES 与 tray.rs::tray_short_code
@@ -105,7 +107,7 @@ function providerLabel(name: string): string {
   return PROVIDER_OPTIONS.find((o) => o.value === name)?.label || name;
 }
 
-function Settings({ onBack }: SettingsProps) {
+function Settings({ onBack, background }: SettingsProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [health, setHealth] = useState<ConfigHealth | null>(null);
   const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
@@ -232,6 +234,20 @@ function Settings({ onBack }: SettingsProps) {
       setConfig((c) => (c ? { ...c } : c));
     } finally {
       setNotifBusy(false);
+    }
+  };
+
+  /** 背景区块开关：编排逻辑在 useFrozenBackground（App 持有），本页只管
+   *  busy 态与失败 toast。hook 状态不翻转 = 开关回弹，天然覆盖失败路径。 */
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const applyBackgroundMode = async (frozen: boolean) => {
+    setBackgroundBusy(true);
+    try {
+      await background.setMode(frozen ? 'frozen' : 'follow');
+    } catch (e) {
+      setMessage(`背景设置失败: ${e}`);
+    } finally {
+      setBackgroundBusy(false);
     }
   };
 
@@ -474,6 +490,34 @@ function Settings({ onBack }: SettingsProps) {
             <span className="update-hint">
               开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
               能否收到取决于系统通知权限（设置 → 通知），建议用测试通知自证。
+            </span>
+          </div>
+        </div>
+
+        {/* 背景 */}
+        <div className="settings-section">
+          <h3>背景</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">固定背景（不随桌面壁纸变化）</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={background.mode === 'frozen'}
+                  disabled={background.busy || backgroundBusy}
+                  onChange={(e) => applyBackgroundMode(e.target.checked)}
+                />
+              </label>
+            </div>
+            {background.loadFailed && (
+              <div style={BANNER_TONE.warn}>
+                <span style={BANNER_TITLE}>背景图加载失败</span>
+                <span>已回退为跟随系统外观；请重新开启一次「固定背景」重新截取。</span>
+              </div>
+            )}
+            <span className="update-hint">
+              开关即时生效。开启时会闪现约半秒纯背景，随即把当前半透明效果截取为固定图；
+              再次开启即重新截取。关闭后恢复实时跟随桌面壁纸。首次使用需授予屏幕录制权限。
             </span>
           </div>
         </div>

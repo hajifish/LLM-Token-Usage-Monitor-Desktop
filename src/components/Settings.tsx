@@ -174,7 +174,7 @@ function Settings({ onBack }: SettingsProps) {
         <div className="settings-section">
           <div className="tray-display-card">
             <div className="update-row">
-              <span className="update-row-label">在菜单栏图标旁显示指标文字</span>
+              <span className="update-row-label">菜单栏显示指标</span>
               <label className="toggle">
                 <input
                   type="checkbox"
@@ -215,7 +215,7 @@ function Settings({ onBack }: SettingsProps) {
           {/* 点击行为：左键直接打开主页（右键始终弹详情菜单） */}
           <div className="tray-display-card">
             <div className="update-row">
-              <span className="update-row-label">点击菜单栏图标直接打开主页</span>
+              <span className="update-row-label">点击图标打开主页</span>
               <label className="toggle">
                 <input
                   type="checkbox"
@@ -235,7 +235,7 @@ function Settings({ onBack }: SettingsProps) {
         <div className="settings-section">
           <div className="tray-display-card">
             <div className="update-row">
-              <span className="update-row-label">余额/配额告警恶化时弹系统通知</span>
+              <span className="update-row-label">余额告警逐级通知</span>
               <div className="update-row-actions">
                 <button
                   className="cancel-btn"

@@ -47,21 +47,17 @@ pub async fn send_test_notification(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 应用托盘点击行为运行时开关：读配置状态并同步到持久 TrayIcon（id "main_tray"）。
-/// 设置页切换后调用，立即生效；托盘对象全程持久、每轮仅原地更新菜单内容，
-/// 故无需重建托盘。create_tray 的启动初值由 lib.rs setup 传入，两处口径一致。
+/// 应用托盘点击行为运行时开关：设置页切换后调用，立即生效。
+/// 统一走 [`crate::tray::sync_tray_click_flag`]（可见性感知）——与启动、
+/// 关窗、各 show 路径共用单一逻辑源，避免「落盘值 ≠ 运行时标志」的口径分叉。
+/// 托盘对象全程持久、每轮仅原地更新菜单内容，故无需重建托盘。
 #[tauri::command]
-pub async fn apply_tray_click_behavior(
-    app: AppHandle,
-    config_state: tauri::State<'_, Arc<RwLock<AppConfig>>>,
-) -> Result<(), String> {
-    let opens = config_state.read().await.tray_click_opens_window;
-    if let Some(tray) = app.tray_by_id("main_tray") {
-        tray.set_show_menu_on_left_click(!opens)
-            .map_err(|e| format!("托盘点击行为设置失败: {e}"))?;
-    } else {
+pub async fn apply_tray_click_behavior(app: AppHandle) -> Result<(), String> {
+    // 缺失即报错（sync 对缺失是静默跳过，此处要对用户可观测）
+    if app.tray_by_id("main_tray").is_none() {
         return Err("托盘句柄缺失（main_tray），无法应用点击行为".into());
     }
+    crate::tray::sync_tray_click_flag(&app);
     Ok(())
 }
 

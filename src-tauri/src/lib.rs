@@ -110,6 +110,8 @@ pub fn run() {
                             log::error!("Ready 阶段显示主窗口失败: {}", e);
                         }
                         let _ = window.set_focus();
+                        // 窗口转入可见：打开主页模式下点击托盘应弹详情菜单
+                        crate::tray::sync_tray_click_flag(app_handle);
                     } else {
                         log::error!("Ready 阶段未找到 main 窗口（get_webview_window 为 None）");
                     }

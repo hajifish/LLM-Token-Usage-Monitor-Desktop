@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { UsageSummary } from '../types';
+import type { AppConfig, ProviderStatus, UsageSummary } from '../types';
+import { providerLabel } from '../providerMeta';
 
 export type { BalanceData, QuotaInfo, UsageData, ProviderStatus, UsageSummary } from '../types';
 
@@ -83,5 +84,50 @@ export function useUsage() {
     };
   }, []);
 
-  return { summary, loading, refreshing, error, refresh };
+  /** 供应商变更后的刷新：先把「配置里有、上一轮结果里还没有」的启用供应商
+   *  乐观合成为待刷新行（面板立即给出「加上了」的反馈，行内显示加载中），
+   *  再走常规 refresh 等真实数据落盘替换。匹配按类型计数差额：同类型多账号、
+   *  别名空回退显示名的口径差异都能对齐，不会把存量行误判为新增。
+   *  配置读取失败则跳过乐观显示，退化为纯 refresh。 */
+  const refreshAfterProviderChange = useCallback(async () => {
+    try {
+      const cfg = await invoke<AppConfig>('get_config');
+      setSummary((cur) => {
+        // 每个类型已出现在上一轮结果里的数量；配置遍历时逐个抵扣，差额即新增
+        const seen = new Map<string, number>();
+        for (const p of cur?.providers ?? []) {
+          seen.set(p.name, (seen.get(p.name) ?? 0) + 1);
+        }
+        const pending: ProviderStatus[] = [];
+        for (const pc of cfg.providers) {
+          if (!pc.enabled) continue;
+          const n = seen.get(pc.name) ?? 0;
+          if (n > 0) {
+            seen.set(pc.name, n - 1);
+          } else {
+            pending.push({
+              name: pc.name,
+              alias: pc.alias?.trim() || providerLabel(pc.name),
+              enabled: true,
+              balance: null,
+              usage: null,
+              error: null,
+              quota_infos: null,
+            });
+          }
+        }
+        if (!pending.length) return cur;
+        return {
+          providers: [...(cur?.providers ?? []), ...pending],
+          total_balance: cur?.total_balance ?? 0,
+          last_updated: cur?.last_updated ?? '',
+        };
+      });
+    } catch {
+      // 配置读取失败：不做乐观显示，直接走刷新
+    }
+    await refresh();
+  }, [refresh]);
+
+  return { summary, loading, refreshing, error, refresh, refreshAfterProviderChange };
 }

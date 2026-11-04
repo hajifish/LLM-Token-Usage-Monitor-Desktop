@@ -11,7 +11,7 @@ import { useUsage } from './hooks/useUsage';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings' | 'providers'>('usage');
-  const { summary, loading, refreshing, error, refresh } = useUsage();
+  const { summary, loading, refreshing, error, refresh, refreshAfterProviderChange } = useUsage();
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -124,9 +124,9 @@ function App() {
           <Providers
             onBack={() => {
               setView('usage');
-              // 保存触发的后端轮询有秒级网络延迟：返回主页即进入刷新态，
-              // 数据一到面板立即显示新供应商，避免「以为没加上」
-              refresh();
+              // 乐观显示：新供应商行立即出现在面板上（行内「加载中」），
+              // 真实数据由随后的刷新轮补齐——慢供应商也能马上确认添加成功
+              refreshAfterProviderChange();
             }}
           />
         )}

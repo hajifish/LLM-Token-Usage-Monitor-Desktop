@@ -8,10 +8,7 @@
 
 ## 版本号与发版机制（重要，勿凭直觉操作）
 
-- 版本号 = 发布 tag，格式必须是 `vX.Y.Z`（如 `v0.3.0`）。release.yml 构建时直接取 `${tag#v}` 写入 5 处清单；全局只升不降（应用内更新按 semver 比较）。号段规则（已授权自动决定，无需再问）：
-  - 较大功能改进（新功能/页面/交互，无破坏性变更）→ **次版本号 +1**：0.5.0、0.6.0 …
-  - 超大版本（彻底重做/架构级更新）→ **主版本号 +1**：v1.0.0、v2.0.0 …
-  - 小修 / hotfix → **补丁号 +1**：0.5.1、0.5.2 …
+- 版本号 = 发布 tag，格式必须是 `vX.Y.Z`（如 `v0.3.0`）。release.yml 构建时直接取 `${tag#v}` 写入 5 处清单；号段由人工决定，全局只升不降（应用内更新按 semver 比较）。
 - 发版流程：develop → master 合并 → 手动 `git tag vX.Y.Z && git push origin vX.Y.Z` → tag push 自动触发 release.yml → 等草稿 Release 构建完成 → 手动 publish。
   - 不要再用「自动推 tag」的自动化（旧的 auto-tag.yml 已删除）：用 GITHUB_TOKEN 推的 tag **不会级联触发** release.yml。
   - 兜底：tag 未能触发时 `gh workflow run release.yml --ref <tag>`。

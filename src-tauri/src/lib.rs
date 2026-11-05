@@ -23,6 +23,7 @@ use commands::{
 };
 use models::UsageSummary;
 use scheduler::Scheduler;
+use skills::list_skills;
 use tauri_plugin_log::{Target, TargetKind};
 
 /// 判断本次启动是否应显示主窗口：开机自启以 --minimized 启动时保持静默驻留托盘。
@@ -96,6 +97,7 @@ pub fn run() {
             trigger_refresh,
             apply_tray_click_behavior,
             apply_window_effects,
+            list_skills,
             updater::get_update_status,
             updater::check_update,
             updater::download_update,

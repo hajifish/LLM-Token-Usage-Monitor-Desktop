@@ -248,6 +248,41 @@ fn scan_plugin_skills(config_dir: &Path, agent: &str) -> Vec<SkillEntry> {
     scan_plugin_cache(config_dir)
 }
 
+/// agent 合法值与各自的家目录配置目录名
+const AGENT_DIRS: &[(&str, &str)] = &[("claude", ".claude"), ("codex", ".codex")];
+
+fn agent_dir(agent: &str) -> Option<&'static str> {
+    AGENT_DIRS
+        .iter()
+        .find(|(a, _)| *a == agent)
+        .map(|(_, d)| *d)
+}
+
+/// 只读扫描本机 Claude Code / Codex 的 skill 清单(自建 + 插件),供 Skills 页展示。
+/// 同步命令:本地 IO 毫秒级。返回列表按「自建在前、插件在后」,组内按名字
+/// 不分大小写排序(同名按路径),保证 UI 顺序稳定。
+#[tauri::command]
+pub fn list_skills(agent: String) -> Result<Vec<SkillEntry>, String> {
+    let config_dir_name = agent_dir(&agent)
+        .ok_or_else(|| format!("未知的 agent 参数:{agent}(仅支持 claude / codex)"))?;
+    let home = dirs::home_dir().ok_or_else(|| "无法确定用户主目录".to_string())?;
+    let config_dir = home.join(config_dir_name);
+    let sort_by_name = |v: &mut Vec<SkillEntry>| {
+        v.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.path.cmp(&b.path))
+        });
+    };
+    let mut user = scan_user_skills(&config_dir);
+    let mut plugin = scan_plugin_skills(&config_dir, &agent);
+    sort_by_name(&mut user);
+    sort_by_name(&mut plugin);
+    user.extend(plugin);
+    Ok(user)
+}
+
 #[cfg(test)]
 mod skills_tests {
     use super::*;
@@ -425,5 +460,12 @@ mod skills_tests {
         assert_eq!(entries[0].name, "pdf");
         assert_eq!(entries[0].plugin_name.as_deref(), Some("pdf"));
         assert_eq!(entries[0].plugin_org.as_deref(), Some("openai-curated"));
+    }
+
+    // ---- 命令层 ----
+
+    #[test]
+    fn list_skills_rejects_unknown_agent() {
+        assert!(list_skills("cursor".to_string()).is_err());
     }
 }

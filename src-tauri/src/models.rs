@@ -67,7 +67,8 @@ pub enum BackgroundMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub providers: Vec<ProviderConfig>,
-    /// 刷新间隔（秒）；旧配置文件缺此字段时由 serde default 兜底为 60
+    /// 刷新间隔（秒）；旧配置文件缺此字段时由 serde default 兜底为 180（3 分钟）。
+    /// 已落盘配置不受影响（serde 用存量值）——改默认只作用于新装/重置配置
     #[serde(default = "default_refresh_interval")]
     pub refresh_interval: u64,
     /// 是否自动检查更新（启动 60 秒后首查，之后每小时一次）
@@ -89,7 +90,7 @@ pub struct AppConfig {
 }
 
 fn default_refresh_interval() -> u64 {
-    60
+    180
 }
 
 fn default_auto_check_update() -> bool {

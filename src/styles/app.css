@@ -909,3 +909,193 @@ input:focus, select:focus {
   pointer-events: none;
   z-index: 0;
 }
+
+/* ===== Skills 清单页 ===== */
+.skills-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--system-label);
+}
+
+/* agent 分段切换（skills 页 header 右侧） */
+.skills-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 2px;
+}
+.skills-tab {
+  border: none;
+  background: none;
+  color: var(--system-secondary-label);
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.skills-tab:hover {
+  color: var(--system-label);
+}
+/* active 态用各自品牌色：Claude 橙 / OpenAI 亮白 */
+.skills-tab.claude.active {
+  color: #d97757;
+  background: rgba(217, 119, 87, 0.16);
+}
+.skills-tab.codex.active {
+  color: var(--system-label);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.skills-search {
+  margin-bottom: 12px;
+}
+
+/* 插件分组:一行标题(插件名+数量)可折叠,展开才铺卡片网格 */
+.plugin-group {
+  margin-bottom: 4px;
+}
+.plugin-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--system-secondary-label);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.plugin-group-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--system-label);
+}
+.plugin-group-caret {
+  font-size: 10px;
+  color: var(--system-tertiary-label);
+}
+.plugin-group-name {
+  font-weight: 600;
+}
+/* 插件一句话简介:词典中文或 plugin.json 原文,单行截断不换行 */
+.plugin-group-desc {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--system-tertiary-label);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plugin-group-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--system-tertiary-label);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+  padding: 0 8px;
+}
+.plugin-group .skills-grid {
+  margin: 2px 0 10px 10px;
+}
+
+/* skill 卡片网格：一行 5 个，铺满内容区 */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.skill-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.skill-card-name {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--system-label);
+  word-break: break-word;
+  /* 名称最多两行，超出省略 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.skill-card-desc {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--system-tertiary-label);
+  word-break: break-word;
+  /* 描述最多三行，超出省略 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* 悬停详情弹窗（fixed 定位由组件内联 style 给出，避开滚动容器裁剪）。
+   pointer-events:none：纯提示不拦截鼠标，防止滑向弹窗时卡片失焦闪烁 */
+.skill-popover {
+  position: fixed;
+  z-index: 1000;
+  background: rgba(32, 32, 36, 0.98);
+  border: 1px solid var(--system-separator);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow-y: auto;
+  pointer-events: none;
+}
+.skill-popover-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--system-label);
+  word-break: break-word;
+}
+.skill-popover-desc {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--system-secondary-label);
+  word-break: break-word;
+}
+.skill-popover-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  align-items: baseline;
+}
+.skill-popover-label {
+  flex-shrink: 0;
+  color: var(--system-tertiary-label);
+}
+.skill-popover-path {
+  color: var(--system-secondary-label);
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* 空态 / 错误态 */
+.skills-empty,
+.skills-error {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--system-tertiary-label);
+  font-size: 13px;
+}
+.skills-error {
+  color: #ffb3b3;
+}

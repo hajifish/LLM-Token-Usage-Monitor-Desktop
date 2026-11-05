@@ -5,7 +5,8 @@
 //! 只取 name / description 两个单行字段,失败不致命(回退目录名/空描述)。
 
 use serde::Serialize;
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// 与 `src/types.ts` 的 `SkillEntry` 严格一致(snake_case)。
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -159,6 +160,94 @@ fn scan_user_skills(config_dir: &Path) -> Vec<SkillEntry> {
     scan_skill_dirs(&config_dir.join("skills"), None, None, "user")
 }
 
+/// 解析 ~/.claude/plugins/installed_plugins.json,返回去重后的
+/// (org, plugin_name, install_path)。键形如 "frontend-design@claude-plugins-official";
+/// 同一 installPath 可能因 user/project 双 scope 重复,按 installPath 去重。
+/// 文件缺失或解析失败返回 None(调用方回退裸扫 cache)。
+fn claude_installed_plugin_dirs(plugins_root: &Path) -> Option<Vec<(String, String, PathBuf)>> {
+    let manifest = std::fs::read_to_string(plugins_root.join("installed_plugins.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+    let plugins = value.get("plugins")?.as_object()?;
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for (key, records) in plugins {
+        let (name, org) = match key.split_once('@') {
+            Some((n, o)) => (n.to_string(), o.to_string()),
+            None => (key.clone(), String::new()),
+        };
+        for record in records.as_array().into_iter().flatten() {
+            let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if seen.insert(install_path.to_string()) {
+                out.push((org.clone(), name.clone(), PathBuf::from(install_path)));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// 裸扫 <config_dir>/plugins/cache/<org>/<plugin>/<version>/skills/*/SKILL.md。
+/// Codex 的主路径;Claude 在清单缺失/损坏时的回退。隐藏目录各层均跳过。
+fn scan_plugin_cache(config_dir: &Path) -> Vec<SkillEntry> {
+    let cache = config_dir.join("plugins").join("cache");
+    let mut out = Vec::new();
+    let Ok(orgs) = std::fs::read_dir(&cache) else {
+        return out;
+    };
+    for org in orgs.flatten() {
+        let org_name = org.file_name().to_string_lossy().into_owned();
+        if org_name.starts_with('.') {
+            continue;
+        }
+        let Ok(plugins) = std::fs::read_dir(org.path()) else {
+            continue;
+        };
+        for plugin in plugins.flatten() {
+            let plugin_name = plugin.file_name().to_string_lossy().into_owned();
+            if plugin_name.starts_with('.') {
+                continue;
+            }
+            let Ok(versions) = std::fs::read_dir(plugin.path()) else {
+                continue;
+            };
+            // 同插件多版本目录不去重,如实列出(实际极少发生)
+            for version in versions.flatten() {
+                if version.file_name().to_string_lossy().starts_with('.') {
+                    continue;
+                }
+                out.extend(scan_skill_dirs(
+                    &version.path().join("skills"),
+                    Some(&plugin_name),
+                    Some(&org_name),
+                    "plugin",
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// 插件 skill 扫描:
+/// - claude:以 installed_plugins.json 的 installPath 为准(区分已安装与卸载残留),
+///   清单缺失/解析失败回退裸扫 cache(log::warn);
+/// - codex:无安装清单,直接裸扫 cache。
+fn scan_plugin_skills(config_dir: &Path, agent: &str) -> Vec<SkillEntry> {
+    let plugins_root = config_dir.join("plugins");
+    if agent == "claude" {
+        if let Some(dirs) = claude_installed_plugin_dirs(&plugins_root) {
+            return dirs
+                .into_iter()
+                .flat_map(|(org, name, path)| {
+                    scan_skill_dirs(&path.join("skills"), Some(&name), Some(&org), "plugin")
+                })
+                .collect();
+        }
+        log::warn!("Skills: installed_plugins.json 缺失或解析失败,回退裸扫 plugins/cache");
+    }
+    scan_plugin_cache(config_dir)
+}
+
 #[cfg(test)]
 mod skills_tests {
     use super::*;
@@ -263,5 +352,78 @@ mod skills_tests {
     fn scan_user_skills_missing_root_returns_empty() {
         let s = ScratchDir::new("user-missing");
         assert!(scan_user_skills(&s.path().join("nonexistent")).is_empty());
+    }
+
+    // ---- 插件扫描 ----
+
+    #[test]
+    fn claude_manifest_takes_precedence_over_cache() {
+        let s = ScratchDir::new("manifest");
+        let plugins = s.path().join("plugins");
+        // 已安装插件(清单指向 inst-a;同一 installPath 双 scope 记录应去重)
+        let inst_a = plugins.join("cache/org-a/installed-plugin/1.0.0");
+        write_skill(
+            &inst_a.join("skills"),
+            "alpha",
+            "---\nname: alpha\ndescription: 已安装\n---\n",
+        );
+        // cache 残留(清单未指向):不应出现
+        let stale = plugins.join("cache/org-a/stale-plugin/0.1.0");
+        write_skill(&stale.join("skills"), "ghost", "---\nname: ghost\n---\n");
+        let manifest = r#"{"version":2,"plugins":{"installed-plugin@org-a":[
+            {"scope":"user","installPath":"INST_A"},
+            {"scope":"project","installPath":"INST_A"}]}}"#
+            .replace("INST_A", inst_a.to_str().unwrap());
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(plugins.join("installed_plugins.json"), manifest).unwrap();
+
+        let entries = scan_plugin_skills(s.path(), "claude");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "alpha");
+        assert_eq!(entries[0].source, "plugin");
+        assert_eq!(entries[0].plugin_name.as_deref(), Some("installed-plugin"));
+        assert_eq!(entries[0].plugin_org.as_deref(), Some("org-a"));
+    }
+
+    #[test]
+    fn claude_manifest_corrupt_falls_back_to_cache() {
+        let s = ScratchDir::new("corrupt");
+        let plugins = s.path().join("plugins");
+        let cache_plugin = plugins.join("cache/org-b/p/2.0.0");
+        write_skill(
+            &cache_plugin.join("skills"),
+            "beta",
+            "---\nname: beta\n---\n",
+        );
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(plugins.join("installed_plugins.json"), "{不是 json").unwrap();
+
+        let entries = scan_plugin_skills(s.path(), "claude");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "beta");
+        assert_eq!(entries[0].plugin_org.as_deref(), Some("org-b"));
+    }
+
+    #[test]
+    fn codex_scans_cache_directly() {
+        let s = ScratchDir::new("codex");
+        let version_dir = s.path().join("plugins/cache/openai-curated/pdf/26.1.0");
+        write_skill(
+            &version_dir.join("skills"),
+            "pdf",
+            "---\nname: pdf\ndescription: PDF 处理\n---\n",
+        );
+        // 隐藏组织目录(如 .plugin-appserver):跳过
+        write_skill(
+            &s.path().join("plugins/cache/.hidden/p/1.0/skills"),
+            "secret",
+            "---\nname: secret\n---\n",
+        );
+
+        let entries = scan_plugin_skills(s.path(), "codex");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "pdf");
+        assert_eq!(entries[0].plugin_name.as_deref(), Some("pdf"));
+        assert_eq!(entries[0].plugin_org.as_deref(), Some("openai-curated"));
     }
 }

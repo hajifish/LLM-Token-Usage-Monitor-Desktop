@@ -5,6 +5,7 @@
 //! 只取 name / description 两个单行字段,失败不致命(回退目录名/空描述)。
 
 use serde::Serialize;
+use std::path::Path;
 
 /// 与 `src/types.ts` 的 `SkillEntry` 严格一致(snake_case)。
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -109,6 +110,55 @@ fn parse_frontmatter(content: &str) -> Frontmatter {
     fm
 }
 
+/// 扫描 skills 目录下每个非隐藏子目录的 SKILL.md,构造 SkillEntry。
+/// - 无 frontmatter name → 回退目录名;description 缺失 → 空串
+/// - 目录不存在 / 子目录无 SKILL.md → 跳过(静默)
+/// - SKILL.md 存在但读取失败 → log::warn 后跳过,不阻塞整页
+fn scan_skill_dirs(
+    root: &Path,
+    plugin_name: Option<&str>,
+    plugin_org: Option<&str>,
+    source: &str,
+) -> Vec<SkillEntry> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out; // 目录不存在:正常空列表
+    };
+    for entry in entries.flatten() {
+        let file_name_os = entry.file_name();
+        let Some(file_name) = file_name_os.to_str() else {
+            continue;
+        };
+        if file_name.starts_with('.') {
+            continue; // 隐藏目录(含 Codex .system 内置 skill)
+        }
+        let skill_md = entry.path().join("SKILL.md");
+        let content = match std::fs::read_to_string(&skill_md) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                log::warn!("Skills: 读取失败,跳过 {}: {e}", skill_md.display());
+                continue;
+            }
+        };
+        let fm = parse_frontmatter(&content);
+        out.push(SkillEntry {
+            name: fm.name.unwrap_or_else(|| file_name.to_string()),
+            description: fm.description.unwrap_or_default(),
+            source: source.to_string(),
+            plugin_name: plugin_name.map(str::to_string),
+            plugin_org: plugin_org.map(str::to_string),
+            path: skill_md.to_string_lossy().into_owned(),
+        });
+    }
+    out
+}
+
+/// 用户级 skill:<config_dir>/skills/<名>/SKILL.md(config_dir 如 ~/.claude、~/.codex)
+fn scan_user_skills(config_dir: &Path) -> Vec<SkillEntry> {
+    scan_skill_dirs(&config_dir.join("skills"), None, None, "user")
+}
+
 #[cfg(test)]
 mod skills_tests {
     use super::*;
@@ -153,5 +203,65 @@ mod skills_tests {
         );
         assert_eq!(fm.name.as_deref(), Some("x"));
         assert_eq!(fm.description, None);
+    }
+
+    // ---- 目录扫描 ----
+    // 手写 tempdir(项目惯例,见 qoder.rs 测试;不引入 tempfile dev-dep)
+    struct ScratchDir(std::path::PathBuf);
+    impl ScratchDir {
+        fn new(tag: &str) -> Self {
+            let p = std::env::temp_dir()
+                .join(format!("llmtm-skills-test-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            ScratchDir(p)
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// 在 root/<dir>/ 下写一个 SKILL.md
+    fn write_skill(root: &std::path::Path, dir: &str, md: &str) {
+        let dir = root.join(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), md).unwrap();
+    }
+
+    #[test]
+    fn scan_user_skills_collects_entries_with_fallbacks() {
+        let s = ScratchDir::new("user");
+        let skills_root = s.path().join("skills");
+        write_skill(
+            &skills_root,
+            "commit",
+            "---\nname: commit\ndescription: 提交。\n---\n正文",
+        );
+        write_skill(&skills_root, "no-frontmatter", "正文");
+        // 隐藏目录(Codex .system 同理):跳过
+        write_skill(&skills_root, ".system", "---\nname: hidden\n---\n");
+        // 无 SKILL.md 的目录:跳过
+        std::fs::create_dir_all(skills_root.join("empty-dir")).unwrap();
+
+        let entries = scan_user_skills(s.path());
+        assert_eq!(entries.len(), 2);
+        let commit = entries.iter().find(|e| e.name == "commit").unwrap();
+        assert_eq!(commit.source, "user");
+        assert_eq!(commit.description, "提交。");
+        assert!(commit.path.ends_with("commit/SKILL.md"));
+        assert_eq!(commit.plugin_name, None);
+        let nofm = entries.iter().find(|e| e.name == "no-frontmatter").unwrap();
+        assert_eq!(nofm.description, "");
+    }
+
+    #[test]
+    fn scan_user_skills_missing_root_returns_empty() {
+        let s = ScratchDir::new("user-missing");
+        assert!(scan_user_skills(&s.path().join("nonexistent")).is_empty());
     }
 }

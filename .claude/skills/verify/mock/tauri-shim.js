@@ -139,6 +139,9 @@
     usage,
     config,
     skills,
+    // get_skill_i18n 用户本地覆盖：默认空（= 覆盖文件缺失，页面回退英文）；
+    // 测中文展示时在页内改写 __VERIFY_MOCK__.i18n 后重扫
+    i18n: { plugins: {}, skills: {} },
     update: updateStatus,
     version: '0.2.18',
     refreshCount: 0,
@@ -217,6 +220,7 @@
       if (!list) return Promise.reject(`未知的 agent 参数:${args.agent}(仅支持 claude / codex)`);
       return list;
     },
+    get_skill_i18n: () => state.i18n,
 
     // Updater: debug 构建语义 — 自动检查跳过、安装被拒（与真实 debug 行为同口径）
     'updater:get_update_status': () => state.update,

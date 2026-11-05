@@ -6,7 +6,7 @@
 - User section: `用户目录 (n)` grid of cards.
 - Plugin section: `插件下载(n 个插件)` — plugin groups collapsed by default, one row per plugin (name + count), click to expand; group header shows the plugin's one-line description.
 - Search box (placeholder `搜索名称 / 描述 / 插件…`) — filters across name/description/plugin; forces groups expanded while searching.
-- Rescan button (title `重新扫描`), per-card detail (SKILL.md path), Chinese description display via the static zh dictionary with English fallback.
+- Rescan button (title `重新扫描`), per-card detail (SKILL.md path), Chinese description display via the user-local i18n override (`get_skill_i18n`; empty when absent) with English fallback.
 
 ## How to get to it (user POV)
 
@@ -18,6 +18,6 @@ Navigate to `:1421`, click the button titled `Skill 清单`. Default (claude tab
 
 ## Gotchas
 
-- Mock fixtures live in `mock/tauri-shim.js` (`skills.claude` / `skills.codex`). To prove dictionary/fallback behavior, mutate `__VERIFY_MOCK__.skills.claude` in-page and rescan rather than editing fixtures.
+- Mock fixtures live in `mock/tauri-shim.js` (`skills.claude` / `skills.codex` / `i18n`). To prove i18n/fallback behavior, mutate `__VERIFY_MOCK__.i18n` or `__VERIFY_MOCK__.skills.claude` in-page and rescan rather than editing fixtures.
 - The claude tab reflects the scanning of `~/.claude` in the REAL app — real-machine results differ from mock fixtures; that difference is Lane B territory, not a Lane A bug.
 - `list_skills` with an unknown agent rejects with the backend's error string — only reachable via direct invoke, not the UI; don't chase it through the page.

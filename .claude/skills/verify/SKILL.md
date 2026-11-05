@@ -5,7 +5,7 @@ description: Drive the Token Usage desktop app (Tauri + React) the way a user do
 
 # verify — Token Usage desktop app
 
-Repo: `LLM-Token-Usage-Monitor-Desktop` — a Tauri v2 menu-bar app (React 18 + Vite frontend, Rust backend) that monitors LLM provider token usage/balance. Frontend runs at Vite `:1420` (strictPort); Rust exposes 13 IPC commands (`get_usage`, `get_config`, `get_config_health`, `save_config`, `trigger_refresh`, `send_test_notification`, `apply_tray_click_behavior`, `apply_window_effects`, `list_skills`, `get_update_status`, `check_update`, `download_update`, `install_update`).
+Repo: `LLM-Token-Usage-Monitor-Desktop` — a Tauri v2 menu-bar app (React 18 + Vite frontend, Rust backend) that monitors LLM provider token usage/balance. Frontend runs at Vite `:1420` (strictPort); Rust exposes 14 IPC commands (`get_usage`, `get_config`, `get_config_health`, `save_config`, `trigger_refresh`, `send_test_notification`, `apply_tray_click_behavior`, `apply_window_effects`, `list_skills`, `get_skill_i18n`, `get_update_status`, `check_update`, `download_update`, `install_update`).
 
 ## Two lanes — pick per change
 

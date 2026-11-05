@@ -70,6 +70,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`verify inject-server: http://localhost:${PORT} -> ${UPSTREAM} (shim injected)`);
 });

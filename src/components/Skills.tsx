@@ -71,9 +71,7 @@ function popoverStyle(rect: DOMRect): CSSProperties {
   );
   const below = rect.bottom + 8;
   const y =
-    below + POPOVER_MAX_H <= window.innerHeight
-      ? below
-      : Math.max(rect.top - POPOVER_MAX_H - 8, 8);
+    below + POPOVER_MAX_H <= window.innerHeight ? below : Math.max(rect.top - POPOVER_MAX_H - 8, 8);
   return { left: x, top: y, width: POPOVER_W, maxHeight: POPOVER_MAX_H };
 }
 
@@ -105,9 +103,7 @@ function Skills({ onBack }: SkillsProps) {
     Promise.all([
       invoke<SkillEntry[]>('list_skills', { agent: a }),
       // 覆盖文件缺失属正常路径,不作为错误打扰页面
-      invoke<SkillI18n>('get_skill_i18n').catch(
-        (): SkillI18n => ({ plugins: {}, skills: {} }),
-      ),
+      invoke<SkillI18n>('get_skill_i18n').catch((): SkillI18n => ({ plugins: {}, skills: {} })),
     ])
       .then(([list, overrides]) => {
         setSkills(list);
@@ -145,6 +141,7 @@ function Skills({ onBack }: SkillsProps) {
         v.toLowerCase().includes(q),
       ),
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- zhSkillDesc 仅闭包 i18n,行为已由 deps 中的 i18n 覆盖
   }, [skills, query, i18n]);
 
   const userSkills = filtered.filter((s) => s.source === 'user');
@@ -171,14 +168,12 @@ function Skills({ onBack }: SkillsProps) {
         group,
       }))
       .sort((a, b) => b.group.length - a.group.length || a.name.localeCompare(b.name));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n 经 zhSkillDesc/group desc 使用
   }, [pluginSkills, i18n]);
 
   /** 搜索中强制展开所有组:命中项藏在收起组里会让搜索看起来失灵 */
   const searching = query.trim() !== '';
 
-  const togglePlugin = (name: string) =>
-    setExpandedPlugins((m) => ({ ...m, [name]: !m[name] }));
+  const togglePlugin = (name: string) => setExpandedPlugins((m) => ({ ...m, [name]: !m[name] }));
 
   /** 卡片只放关键信息:名称 + 描述(截断);悬停看完整详情 */
   const renderCard = (s: SkillEntry) => (

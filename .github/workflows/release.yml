@@ -110,19 +110,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
       - name: Resolve release title
         id: ver
         run: echo "title=Token Usage ${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Fill generated release notes
+      # 发版说明来源：优先仓库内 docs/release-notes/vX.Y.Z.md（发版前随代码入库），
+      # 缺失则回退 GitHub 自动生成（此时 latest.json 的 notes 保持为空，应用内
+      # 更新弹窗将不显示说明——正式发版应始终携带说明文件）。
+      - name: Resolve release notes
+        id: notes
+        run: |
+          NOTES_FILE="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "source=file" >> "$GITHUB_OUTPUT"
+            echo "path=${NOTES_FILE}" >> "$GITHUB_OUTPUT"
+            echo "Using notes file: ${NOTES_FILE}"
+          else
+            echo "source=generated" >> "$GITHUB_OUTPUT"
+            echo "::warning::未找到 ${NOTES_FILE}，回退自动生成说明（应用内更新弹窗将无说明文本）"
+          fi
+
+      - name: Fill release notes from file
+        if: steps.notes.outputs.source == 'file'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.3.0
         with:
           tag_name: ${{ github.ref_name }}
-          # 这里必须显式给 name：不给的话该 action 会把标题写回成 tag 名，
-          # 覆盖掉上面设好的「Token Usage X.Y.Z」
+          # 必须显式给 name：不给的话该 action 会把标题写回成 tag 名
+          name: ${{ steps.ver.outputs.title }}
+          draft: true
+          prerelease: false
+          body_path: ${{ steps.notes.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fill generated release notes
+        if: steps.notes.outputs.source == 'generated'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.3.0
+        with:
+          tag_name: ${{ github.ref_name }}
           name: ${{ steps.ver.outputs.title }}
           draft: true
           prerelease: false
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # latest.json 由构建 job 在说明就位前生成，notes 字段为空；这里把同一份
+      # 说明补写进 latest.json 并覆盖上传——应用内更新弹窗读取的是该文件的
+      # notes 字段（Tauri updater），不是 GitHub Release 页面正文。
+      - name: Patch latest.json notes
+        if: steps.notes.outputs.source == 'file'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          mkdir -p /tmp/relnotes && cd /tmp/relnotes
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "latest.json" --clobber
+          jq --rawfile notes "$GITHUB_WORKSPACE/${{ steps.notes.outputs.path }}" '.notes = $notes' latest.json > latest.new.json
+          mv latest.new.json latest.json
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" latest.json --clobber
+          echo "latest.json notes patched"

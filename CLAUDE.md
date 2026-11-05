@@ -10,6 +10,7 @@
 
 - 版本号 = 发布 tag，格式必须是 `vX.Y.Z`（如 `v0.3.0`）。release.yml 构建时直接取 `${tag#v}` 写入 5 处清单；号段由人工决定，全局只升不降（应用内更新按 semver 比较）。
 - 发版流程：develop → master 合并 → 手动 `git tag vX.Y.Z && git push origin vX.Y.Z` → tag push 自动触发 release.yml → 等草稿 Release 构建完成 → 手动 publish。
+  - 发版说明随代码入库：`docs/release-notes/vX.Y.Z.md`（打 tag 前合入，存在于 tag 树内）。release.yml 读它填 Release 正文，并补写 latest.json 的 notes 字段（应用内更新弹窗读取处）；文件缺失则回退 GitHub 自动生成，且应用内弹窗无说明——正式发版必须携带。
   - 不要再用「自动推 tag」的自动化（旧的 auto-tag.yml 已删除）：用 GITHUB_TOKEN 推的 tag **不会级联触发** release.yml。
   - 兜底：tag 未能触发时 `gh workflow run release.yml --ref <tag>`。
 - 发布产物命名由 `scripts/normalize-release-assets.sh` 统一为 `TokenUsage-X.Y.Z-<arch>.<ext>`（Tauri 默认产出的是 `Token.Usage_X.Y.Z_aarch64.dmg` 这种带点的名字），latest.json 里的下载地址同步改写。产物集合变化时同步更新该脚本的映射表，否则发布会在 normalize 步骤直接失败。

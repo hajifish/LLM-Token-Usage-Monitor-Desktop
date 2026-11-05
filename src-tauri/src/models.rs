@@ -54,7 +54,7 @@ fn default_show_in_tray() -> bool {
     true
 }
 
-/// 背景模式：follow=跟随系统半透明（默认，现状）；frozen=固定背景（截屏固化）。
+/// 背景模式：follow=跟随系统半透明；frozen=固定背景（内置资产，默认）。
 /// 序列化为小写字符串，与前端 `types.ts` 的 `'follow' | 'frozen'` 严格一致。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

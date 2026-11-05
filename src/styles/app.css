@@ -948,102 +948,58 @@ input:focus, select:focus {
   margin-bottom: 12px;
 }
 
-/* skill 行（卡片） */
-.skill-item {
-  margin-bottom: 6px;
+/* skill 卡片网格：一行 5 个，铺满内容区 */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.skill-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
 }
-.skill-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  border: none;
-  background: none;
-  color: var(--system-label);
-  padding: 9px 12px;
-  cursor: pointer;
-  text-align: left;
-  font-size: 13px;
-}
-.skill-row:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-.skill-name {
+.skill-card-name {
   font-weight: 600;
-  flex-shrink: 0;
-  max-width: 40%;
+  font-size: 12.5px;
+  color: var(--system-label);
+  word-break: break-word;
+  /* 名称最多两行，超出省略 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.skill-badge {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--system-blue);
-  background: rgba(10, 132, 255, 0.12);
+.skill-card-desc {
+  margin: 4px 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--system-tertiary-label);
+  word-break: break-word;
+  /* 描述最多三行，超出省略 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+/* 来源标记：自建（绿）/ 插件名（蓝）；margin-top:auto 让标记沉底对齐，
+   描述的 margin-bottom 保证密集卡片里标记与描述仍有最小间距 */
+.skill-card-badge {
+  margin-top: auto;
+  font-size: 10.5px;
+  align-self: flex-start;
   padding: 1px 8px;
   border-radius: 99px;
 }
-.skill-desc {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--system-tertiary-label);
-  font-size: 12px;
+.skill-card-badge.user {
+  color: var(--system-green, #30d558);
+  background: rgba(48, 209, 88, 0.12);
 }
-.skill-caret {
-  flex-shrink: 0;
-  color: var(--system-tertiary-label);
-  font-size: 10px;
-}
-
-/* 行内展开的详情 */
-.skill-detail {
-  padding: 4px 12px 10px;
-  border-top: 1px solid var(--system-separator);
-}
-.skill-detail-desc {
-  margin: 8px 0;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--system-label);
-}
-.skill-detail-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 12px;
-}
-.skill-detail-label {
-  color: var(--system-tertiary-label);
-  flex-shrink: 0;
-}
-.skill-detail-path {
-  color: var(--system-secondary-label);
-  word-break: break-all;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.skill-detail-name {
-  background: rgba(255, 255, 255, 0.08);
-  padding: 2px 8px;
-  border-radius: 6px;
-}
-.skill-copy-btn {
-  border: 1px solid var(--system-separator);
-  background: none;
+.skill-card-badge.plugin {
   color: var(--system-blue);
-  border-radius: 6px;
-  padding: 3px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.skill-copy-btn:hover {
   background: rgba(10, 132, 255, 0.12);
 }
 

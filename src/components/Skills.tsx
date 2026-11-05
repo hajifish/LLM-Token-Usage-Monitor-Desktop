@@ -13,13 +13,6 @@ interface SkillsProps {
   onBack: () => void;
 }
 
-/** 行的唯一键：来源+路径（同名列多条也能稳定区分） */
-const rowKey = (s: SkillEntry) => `${s.source}:${s.path}`;
-
-/** 完整命名：自建 = name；插件 = plugin:name（与 Claude Code 技能清单显示一致） */
-const fullName = (s: SkillEntry) =>
-  s.source === 'plugin' && s.plugin_name ? `${s.plugin_name}:${s.name}` : s.name;
-
 /**
  * Skill 清单页：只读浏览本机 Claude Code / Codex 的 skill（自建 + 插件下载）。
  * 入口为主页 header 图标（App.tsx）。切 tab / 手动刷新时重新扫描，
@@ -30,10 +23,6 @@ function Skills({ onBack }: SkillsProps) {
   const [skills, setSkills] = useState<SkillEntry[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
-  /** 当前展开详情的行 key；null 表示全部收起 */
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  /** 刚复制完成的行 key（短暂显示「已复制」） */
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // 全部 setState 都在异步回调里（effect 内同步 setState 会触发
   // react-hooks/set-state-in-effect）；切换时的「扫描中」由 switchAgent 置空实现
@@ -55,11 +44,10 @@ function Skills({ onBack }: SkillsProps) {
     load(agent);
   }, [agent, load]);
 
-  // 同步重置在事件处理器里做：立即显示「扫描中…」并收起详情，再触发 effect 加载
+  // 同步重置在事件处理器里做：立即显示「扫描中…」，再触发 effect 加载
   const switchAgent = (a: Agent) => {
     if (a === agent) return;
     setSkills(null);
-    setExpandedKey(null);
     setAgent(a);
   };
 
@@ -75,54 +63,20 @@ function Skills({ onBack }: SkillsProps) {
   const userSkills = filtered.filter((s) => s.source === 'user');
   const pluginSkills = filtered.filter((s) => s.source === 'plugin');
 
-  const copy = (s: SkillEntry) => {
-    navigator.clipboard
-      .writeText(fullName(s))
-      .then(() => {
-        setCopiedKey(rowKey(s));
-        setTimeout(() => setCopiedKey(null), 1500);
-      })
-      .catch(console.error);
-  };
-
-  const renderRow = (s: SkillEntry) => {
-    const key = rowKey(s);
-    const expanded = expandedKey === key;
-    return (
-      <div key={key} className="skill-item">
-        <button className="skill-row" onClick={() => setExpandedKey(expanded ? null : key)}>
-          <span className="skill-name">{s.name}</span>
-          {s.plugin_name && <span className="skill-badge">{s.plugin_name}</span>}
-          <span className="skill-desc">{s.description}</span>
-          <span className="skill-caret">{expanded ? '▴' : '▾'}</span>
-        </button>
-        {expanded && (
-          <div className="skill-detail">
-            {s.description && <p className="skill-detail-desc">{s.description}</p>}
-            {s.plugin_org && (
-              <div className="skill-detail-meta">
-                <span className="skill-detail-label">来源</span>
-                <span>
-                  {s.plugin_org} / {s.plugin_name}
-                </span>
-              </div>
-            )}
-            <div className="skill-detail-meta">
-              <span className="skill-detail-label">路径</span>
-              <span className="skill-detail-path">{s.path}</span>
-            </div>
-            <div className="skill-detail-meta">
-              <span className="skill-detail-label">调用名</span>
-              <code className="skill-detail-name">{fullName(s)}</code>
-              <button className="skill-copy-btn" onClick={() => copy(s)}>
-                {copiedKey === key ? '已复制' : '复制'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
+  /** 卡片只放关键信息：名称 + 描述（截断）+ 来源标记（自建 / 插件名） */
+  const renderCard = (s: SkillEntry) => (
+    <div key={`${s.source}:${s.path}`} className="skill-card">
+      <span className="skill-card-name" title={s.name}>
+        {s.name}
+      </span>
+      <p className="skill-card-desc" title={s.description}>
+        {s.description}
+      </p>
+      <span className={`skill-card-badge ${s.source}`}>
+        {s.source === 'user' ? '自建' : s.plugin_name}
+      </span>
+    </div>
+  );
 
   return (
     <div className="settings">
@@ -179,13 +133,13 @@ function Skills({ onBack }: SkillsProps) {
             {userSkills.length > 0 && (
               <div className="settings-section">
                 <h3>自建 ({userSkills.length})</h3>
-                {userSkills.map(renderRow)}
+                <div className="skills-grid">{userSkills.map(renderCard)}</div>
               </div>
             )}
             {pluginSkills.length > 0 && (
               <div className="settings-section">
                 <h3>插件 ({pluginSkills.length})</h3>
-                {pluginSkills.map(renderRow)}
+                <div className="skills-grid">{pluginSkills.map(renderCard)}</div>
               </div>
             )}
             {filtered.length === 0 && (

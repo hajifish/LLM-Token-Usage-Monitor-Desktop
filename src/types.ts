@@ -135,6 +135,8 @@ export interface SkillEntry {
   plugin_name: string | null;
   /** 插件来源组织（claude-plugins-official / openai-curated 等）；自建为 null。 */
   plugin_org: string | null;
+  /** 插件自述（来自 plugin.json，已归一单行）；自建为 null。 */
+  plugin_description: string | null;
   /** SKILL.md 绝对路径（详情展示）。 */
   path: string;
 }

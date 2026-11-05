@@ -2,6 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { SkillEntry } from '../types';
+// 静态中文词典(随包分发;插件更新/新装未覆盖时回退英文原文)
+import pluginsZh from '../i18n/plugins-zh.json';
+import skillsZh from '../i18n/skills-zh.json';
+
+const pluginsZhMap = pluginsZh as Record<string, string>;
+const skillsZhMap = skillsZh as Record<string, string>;
+
+/** skill 描述的中文展示(词典键 plugin:skill;无词条回退原文) */
+const zhSkillDesc = (s: SkillEntry) =>
+  (s.plugin_name && skillsZhMap[`${s.plugin_name}:${s.name}`]) || s.description;
+
+/** 插件组描述:词典优先("org/plugin" 全键),回退 plugin.json 原文 */
+const zhPluginDesc = (key: string, fallback: string) => pluginsZhMap[key] || fallback;
 
 type Agent = 'claude' | 'codex';
 
@@ -126,27 +139,38 @@ function Skills({ onBack }: SkillsProps) {
     if (!skills) return [];
     const q = query.trim().toLowerCase();
     if (!q) return skills;
+    // 中文词典与英文原文都可命中(用户看到的与记到的都可能任一语言)
     return skills.filter((s) =>
-      [s.name, s.description, s.plugin_name ?? ''].some((v) => v.toLowerCase().includes(q)),
+      [s.name, s.description, zhSkillDesc(s), s.plugin_name ?? ''].some((v) =>
+        v.toLowerCase().includes(q),
+      ),
     );
   }, [skills, query]);
 
   const userSkills = filtered.filter((s) => s.source === 'user');
   const pluginSkills = filtered.filter((s) => s.source === 'plugin');
 
-  /** 插件按归属分组(技能多的在前,同数按名排),每组可折叠——
+  /** 插件按归属分组(org/plugin 全键防跨市场撞名;技能多的在前),每组可折叠——
    平铺 90+ 张卡片看不出哪些属于 pstack、哪些属于 superpowers */
   const pluginGroups = useMemo(() => {
     const map = new Map<string, SkillEntry[]>();
     for (const s of pluginSkills) {
-      const key = s.plugin_name ?? '其他';
+      const org = s.plugin_org ?? '';
+      const name = s.plugin_name ?? '其他';
+      const key = `${org}/${name}`;
       const arr = map.get(key);
       if (arr) arr.push(s);
       else map.set(key, [s]);
     }
-    return [...map.entries()].sort(
-      ([an, a], [bn, b]) => b.length - a.length || an.localeCompare(bn),
-    );
+    return [...map.entries()]
+      .map(([key, group]) => ({
+        key,
+        name: group[0].plugin_name ?? '其他',
+        org: group[0].plugin_org ?? '',
+        desc: zhPluginDesc(key, group[0].plugin_description ?? ''),
+        group,
+      }))
+      .sort((a, b) => b.group.length - a.group.length || a.name.localeCompare(b.name));
   }, [pluginSkills]);
 
   /** 搜索中强制展开所有组:命中项藏在收起组里会让搜索看起来失灵 */
@@ -164,7 +188,7 @@ function Skills({ onBack }: SkillsProps) {
       onMouseLeave={() => setHovered(null)}
     >
       <span className="skill-card-name">{s.name}</span>
-      <p className="skill-card-desc">{s.description}</p>
+      <p className="skill-card-desc">{zhSkillDesc(s)}</p>
     </div>
   );
 
@@ -231,17 +255,22 @@ function Skills({ onBack }: SkillsProps) {
             {pluginSkills.length > 0 && (
               <div className="settings-section">
                 <h3>插件下载({pluginGroups.length} 个插件)</h3>
-                {pluginGroups.map(([name, group]) => {
-                  const open = searching || !!expandedPlugins[name];
+                {pluginGroups.map(({ key, name, desc, group }) => {
+                  const open = searching || !!expandedPlugins[key];
                   return (
-                    <div key={name} className="plugin-group">
+                    <div key={key} className="plugin-group">
                       <button
                         className="plugin-group-header"
-                        onClick={() => togglePlugin(name)}
+                        onClick={() => togglePlugin(key)}
                         title={open ? '收起' : '展开'}
                       >
                         <span className="plugin-group-caret">{open ? '▾' : '▸'}</span>
                         <span className="plugin-group-name">{name}</span>
+                        {desc && (
+                          <span className="plugin-group-desc" title={desc}>
+                            {desc}
+                          </span>
+                        )}
                         <span className="plugin-group-count">{group.length}</span>
                       </button>
                       {open && <div className="skills-grid">{group.map(renderCard)}</div>}
@@ -261,8 +290,8 @@ function Skills({ onBack }: SkillsProps) {
       {hovered && (
         <div className="skill-popover" style={popoverStyle(hovered.rect)} role="tooltip">
           <div className="skill-popover-name">{hovered.skill.name}</div>
-          {hovered.skill.description && (
-            <p className="skill-popover-desc">{hovered.skill.description}</p>
+          {zhSkillDesc(hovered.skill) && (
+            <p className="skill-popover-desc">{zhSkillDesc(hovered.skill)}</p>
           )}
           {hovered.skill.plugin_name && (
             <div className="skill-popover-meta">

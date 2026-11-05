@@ -8,6 +8,7 @@ mod notification;
 mod providers;
 mod scheduler;
 mod secrets;
+mod skills;
 mod tray;
 mod updater;
 

@@ -218,9 +218,14 @@
     list_skills: (args) => {
       const list = state.skills[args.agent];
       if (!list) return Promise.reject(`未知的 agent 参数:${args.agent}(仅支持 claude / codex)`);
-      return list;
+      // 浅拷贝换引用:页内原地改 __VERIFY_MOCK__.skills.* 后重扫,新数组引用
+      // 才能让 React 重渲染(同引用会被 Object.is 相等性跳过,重扫看似失灵)
+      return [...list];
     },
-    get_skill_i18n: () => state.i18n,
+    get_skill_i18n: () => ({
+      plugins: { ...state.i18n.plugins },
+      skills: { ...state.i18n.skills },
+    }),
 
     // Updater: debug 构建语义 — 自动检查跳过、安装被拒（与真实 debug 行为同口径）
     'updater:get_update_status': () => state.update,

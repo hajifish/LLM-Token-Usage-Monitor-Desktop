@@ -171,7 +171,9 @@ fn scan_skill_dirs(root: &Path, plugin: Option<PluginCtx>, source: &str) -> Vec<
         };
         let fm = parse_frontmatter(&content);
         out.push(SkillEntry {
-            name: fm.name.unwrap_or_else(|| file_name.to_string()),
+            // 目录名才是 Claude Code 的调用名(/<目录名>),frontmatter name
+            // 可能与目录名不一致(实测存在笔误),以目录名为准
+            name: file_name.to_string(),
             description: fm.description.unwrap_or_default(),
             source: source.to_string(),
             plugin_name: plugin.as_ref().map(|p| p.name.to_string()),
@@ -421,21 +423,34 @@ mod skills_tests {
             "commit",
             "---\nname: commit\ndescription: 提交。\n---\n正文",
         );
+        // frontmatter name 与目录名不一致时显示目录名:目录名才是 Claude Code
+        // 的调用名(/commit),frontmatter name 可能是笔误(实测用户机上的 commit 技能)
+        write_skill(
+            &skills_root,
+            "commit-draft",
+            "---\nname: commit-pr\ndescription: 笔误名字。\n---\n正文",
+        );
         write_skill(&skills_root, "no-frontmatter", "正文");
+        // 空 SKILL.md(0 字节骨架目录,实测用户机上的 deploy-check):名字回退目录名,描述为空
+        write_skill(&skills_root, "empty-file", "");
         // 隐藏目录(Codex .system 同理):跳过
         write_skill(&skills_root, ".system", "---\nname: hidden\n---\n");
         // 无 SKILL.md 的目录:跳过
         std::fs::create_dir_all(skills_root.join("empty-dir")).unwrap();
 
         let entries = scan_user_skills(s.path());
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 4);
         let commit = entries.iter().find(|e| e.name == "commit").unwrap();
         assert_eq!(commit.source, "user");
         assert_eq!(commit.description, "提交。");
         assert!(commit.path.ends_with("commit/SKILL.md"));
         assert_eq!(commit.plugin_name, None);
+        let draft = entries.iter().find(|e| e.name == "commit-draft").unwrap();
+        assert_eq!(draft.description, "笔误名字。");
         let nofm = entries.iter().find(|e| e.name == "no-frontmatter").unwrap();
         assert_eq!(nofm.description, "");
+        let empty = entries.iter().find(|e| e.name == "empty-file").unwrap();
+        assert_eq!(empty.description, "");
     }
 
     #[test]

@@ -1,150 +1,29 @@
 import { useState, useEffect } from 'react';
-import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { AppConfig, ConfigHealth, ProviderConfig } from '../types';
+import type { AppConfig, ProviderConfig } from '../types';
+import { providerLabel } from '../providerMeta';
+import type { FrozenBackgroundState } from '../hooks/useFrozenBackground';
 
 interface SettingsProps {
   onBack: () => void;
+  background: FrozenBackgroundState;
 }
 
-// 新增类型时同步 providers/mod.rs::ALL_PROVIDER_TYPES 与 tray.rs::tray_short_code
-/** 服务商类型下拉与显示名（与 providers/mod.rs 的 display_name 保持同口径）。 */
-const PROVIDER_OPTIONS = [
-  { value: 'OpenAI', label: 'OpenAI(API)' },
-  { value: 'Codex', label: 'Codex' },
-  { value: 'Anthropic', label: 'Anthropic(API)' },
-  { value: 'Claude Code', label: 'Claude Code' },
-  { value: 'DeepSeek', label: 'DeepSeek' },
-  { value: 'Kimi API', label: 'Kimi API' },
-  { value: 'Kimi Code', label: 'Kimi Code' },
-  { value: 'Zhipu', label: '智谱' },
-  { value: 'Qoder', label: 'Qoder' },
-];
-
-/** 无需用户配置 API Key，凭证从本机 CLI / 桌面客户端自动读取的供应商类型。
- *  与 Rust needs_api_key 名单同口径；Qoder 虽属免密默认，但其 PAT 兜底入口
- *  在下方渲染分支特例放行（所有平台可填、可清空）。 */
-const KEYLESS_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
-
-/**
- * 是否 macOS。Qoder 的本地凭据读取（客户端 auth.v1.dat + 钥匙串解密）仅 macOS 支持，
- * 其他平台该路径必然失败，需回退为 PAT 输入（#88）。用 navigator.platform / userAgent
- * 做最小侵入探测，不引入 Tauri 插件。
- */
-const IS_MAC = /Mac/i.test(navigator.platform || '') || /Mac OS X/i.test(navigator.userAgent);
-
-/** 「配置已升级为加密存储」为一次性提示，展示过后写入本地存储不再打扰。 */
-const MIGRATED_NOTICE_KEY = 'llmtm.migratedNoticeShown';
-
-/**
- * 健康提示横幅样式。
- *
- * 刻意使用 inline style：全局样式表由其他改动占用，避免产生冲突。
- */
-const BANNER_BASE: CSSProperties = {
-  margin: '12px 0',
-  padding: '12px 14px',
-  borderRadius: 8,
-  fontSize: 13,
-  lineHeight: 1.7,
-  border: '1px solid',
-  position: 'relative',
-  paddingRight: 36,
-};
-
-const BANNER_TONE: Record<'danger' | 'warn' | 'info', CSSProperties> = {
-  danger: {
-    ...BANNER_BASE,
-    background: 'rgba(255, 77, 79, 0.10)',
-    borderColor: 'rgba(255, 77, 79, 0.55)',
-    color: '#ffb3b3',
-  },
-  warn: {
-    ...BANNER_BASE,
-    background: 'rgba(250, 173, 20, 0.10)',
-    borderColor: 'rgba(250, 173, 20, 0.55)',
-    color: '#ffe0a3',
-  },
-  info: {
-    ...BANNER_BASE,
-    background: 'rgba(64, 150, 255, 0.10)',
-    borderColor: 'rgba(64, 150, 255, 0.55)',
-    color: '#bcd9ff',
-  },
-};
-
-const BANNER_TITLE: CSSProperties = {
-  display: 'block',
-  fontWeight: 700,
-  marginBottom: 4,
-  fontSize: 13.5,
-};
-
-const BANNER_CLOSE: CSSProperties = {
-  position: 'absolute',
-  top: 8,
-  right: 8,
-  border: 'none',
-  background: 'transparent',
-  color: 'inherit',
-  cursor: 'pointer',
-  fontSize: 16,
-  lineHeight: 1,
-  opacity: 0.7,
-  padding: '2px 6px',
-};
-
-/** 从绝对路径中取出文件名，仅用于展示（不暴露完整目录）。 */
-function basename(p: string): string {
-  const parts = p.split(/[\\/]/);
-  return parts[parts.length - 1] || p;
-}
-
-/** 根据 provider 标识取默认显示名（下拉框 label）；未知类型兜底返回标识本身。 */
-function providerLabel(name: string): string {
-  return PROVIDER_OPTIONS.find((o) => o.value === name)?.label || name;
-}
-
-function Settings({ onBack }: SettingsProps) {
+function Settings({ onBack, background }: SettingsProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [health, setHealth] = useState<ConfigHealth | null>(null);
-  const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
-  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
-  /** 正在确认删除的供应商索引；null 表示未在确认中 */
-  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
-
-  /** 刷新健康状态（保存后重新拉取，以便展示备份文件名）。 */
-  const refreshHealth = () =>
-    invoke<ConfigHealth>('get_config_health').then(setHealth).catch(console.error);
 
   useEffect(() => {
     let alive = true;
-    // 并行拉取配置与健康状态；健康状态获取失败不阻塞设置页使用
-    Promise.all([
-      invoke<AppConfig>('get_config'),
-      invoke<ConfigHealth>('get_config_health').catch(() => null),
-    ])
-      .then(([cfg, h]) => {
-        if (!alive) return;
-        setConfig(cfg);
-        setHealth(h);
-        if (h?.migrated_from_plaintext) {
-          if (localStorage.getItem(MIGRATED_NOTICE_KEY)) {
-            // 已展示过，不再重复提示
-            setDismissed((d) => ({ ...d, migrated: true }));
-          } else {
-            localStorage.setItem(MIGRATED_NOTICE_KEY, '1');
-          }
-        }
+    invoke<AppConfig>('get_config')
+      .then((cfg) => {
+        if (alive) setConfig(cfg);
       })
       .catch(console.error);
     return () => {
       alive = false;
     };
   }, []);
-
-  const dismiss = (key: string) => setDismissed((d) => ({ ...d, [key]: true }));
 
   /** 状态栏显示区块的开关即时生效：读最新配置 → 仅改本区块字段 → 落盘。
    *  不经「保存」按钮，也不影响页面上其他未保存的编辑（如正在输入的密钥）。
@@ -204,7 +83,7 @@ function Settings({ onBack }: SettingsProps) {
         };
       });
     } catch (e) {
-      // 失败不静默：走与 handleSave 同一 toast 通道；本地状态不翻转，
+      // 失败不静默：走 toast 通道；本地状态不翻转，
       // 强制刷新以让受控 checkbox 回弹到真实值
       setMessage(`状态栏设置保存失败: ${e}`);
       setConfig((c) => (c ? { ...c } : c));
@@ -235,93 +114,61 @@ function Settings({ onBack }: SettingsProps) {
     }
   };
 
+  /** 背景区块开关：编排逻辑在 useFrozenBackground（App 持有），本页只管
+   *  busy 态与失败 toast。hook 状态不翻转 = 开关回弹，天然覆盖失败路径。 */
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const applyBackgroundMode = async (frozen: boolean) => {
+    setBackgroundBusy(true);
+    try {
+      await background.setMode(frozen ? 'frozen' : 'follow');
+    } catch (e) {
+      setMessage(`背景设置失败: ${e}`);
+    } finally {
+      setBackgroundBusy(false);
+    }
+  };
+
   /** 发送测试通知：桌面端 API 无法检测投递失败与权限拒绝（后端无条件返回成功），
-   *  链路是否真正打通只能由用户亲眼看一次通知来确认。 */
+   *  链路是否真正打通只能由用户亲眼看一次通知来确认。成功也给 toast 反馈：
+   *  让「点过按钮」这件事可见——dev 模式（tauri dev 未打包）通知归属终端/IDE
+   *  宿主应用，打包后才归属本应用，能否弹横幅取决于宿主的通知权限与专注模式。 */
   const [testNotifyBusy, setTestNotifyBusy] = useState(false);
   const sendTestNotification = async () => {
     setTestNotifyBusy(true);
     try {
       await invoke('send_test_notification');
+      setMessage(
+        import.meta.env.DEV
+          ? '测试通知已发出（dev 模式归属终端/IDE 宿主应用）；未收到请检查宿主的通知权限与专注模式'
+          : '测试通知已发出；未收到请检查本应用的通知权限与专注模式',
+      );
     } catch (e) {
-      // 失败不静默：走与 handleSave 同一 toast 通道
+      // 失败不静默：走 toast 通道
       setMessage(`测试通知发送失败: ${e}`);
     } finally {
       setTestNotifyBusy(false);
     }
   };
 
-  const updateProvider = (index: number, field: keyof ProviderConfig, value: string | boolean) => {
-    if (!config) return;
-    const newProviders = [...config.providers];
-    newProviders[index] = { ...newProviders[index], [field]: value };
-    setConfig({ ...config, providers: newProviders });
-  };
-
-  const addProvider = () => {
-    if (!config) return;
-    const def = PROVIDER_OPTIONS[0];
-    // 别名只承载用户自定义值：新增时不预填，展示时由后端回退到供应商默认名
-    setConfig({
-      ...config,
-      providers: [
-        ...config.providers,
-        {
-          name: def.value,
-          api_key: '',
-          enabled: true,
-          platform_token: null,
-          alias: null,
-          show_in_tray: true,
-        },
-      ],
-    });
-  };
-
-  /**
-   * 切换供应商类型：别名只承载用户自定义值。
-   * - 别名为空、或恰好等于旧类型的默认名（历史预填残留）→ 置空，让后端回退到新类型默认名；
-   * - 用户已输入自定义别名 → 保留，不因切换类型而丢失。
-   */
-  const handleProviderNameChange = (index: number, newName: string) => {
-    if (!config) return;
-    const old = config.providers[index];
-    const oldAlias = (old.alias || '').trim();
-    const keepAlias = oldAlias !== '' && oldAlias !== providerLabel(old.name);
-    const newProviders = [...config.providers];
-    newProviders[index] = { ...old, name: newName, alias: keepAlias ? old.alias : null };
-    setConfig({ ...config, providers: newProviders });
-  };
-
-  const removeProvider = (index: number) => {
-    if (!config) return;
-    const newProviders = config.providers.filter((_, i) => i !== index);
-    setConfig({ ...config, providers: newProviders });
-    setDeletingIndex(null);
-  };
-
-  const handleSave = async () => {
-    if (!config) return;
-    setSaving(true);
-    setMessage('');
+  /** 点击行为开关即时生效：读最新配置 → 仅改本字段 → 落盘 → 调命令同步托盘
+   *  运行时开关。与 applyTrayDisplay 同模式：不经保存按钮、后端写入成功才同步
+   *  本地状态；托盘侧 set_show_menu_on_left_click 立即生效，与每轮原地更新菜单
+   *  互不干扰。 */
+  const [trayClickBusy, setTrayClickBusy] = useState(false);
+  const applyTrayClickBehavior = async (value: boolean) => {
+    setTrayClickBusy(true);
     try {
-      // 本页不拥有的字段（refresh_interval / auto_check_update 已无其 UI，归托盘菜单与
-      // 更新逻辑所有）落盘前从最新配置取回，避免用挂载时快照整份写回而静默回滚托盘改动；
-      // providers / tray 字段仍以页面状态为准
       const fresh = await invoke<AppConfig>('get_config');
-      const merged: AppConfig = {
-        ...config,
-        refresh_interval: fresh.refresh_interval,
-        auto_check_update: fresh.auto_check_update,
-      };
-      await invoke('save_config', { newConfig: merged });
-      setMessage('保存成功');
-      // 保存可能触发「覆盖前备份」，重新拉取健康状态以展示备份文件名
-      refreshHealth();
+      fresh.tray_click_opens_window = value;
+      await invoke('save_config', { newConfig: fresh });
+      await invoke('apply_tray_click_behavior');
+      setConfig((cur) => (cur ? { ...cur, tray_click_opens_window: value } : cur));
     } catch (e) {
-      // 后端已将内部错误映射为中文用户可读消息，技术细节仅写日志
-      setMessage(`保存失败: ${e}`);
+      // 失败不静默：走 toast 通道，受控 checkbox 回弹真实值
+      setMessage(`点击行为设置保存失败: ${e}`);
+      setConfig((c) => (c ? { ...c } : c));
     } finally {
-      setSaving(false);
+      setTrayClickBusy(false);
     }
   };
 
@@ -329,82 +176,21 @@ function Settings({ onBack }: SettingsProps) {
     return <div className="settings loading">加载中...</div>;
   }
 
-  const showUnreadable = !!health?.unreadable && !dismissed.unreadable;
-  const showDeferred = !!health?.migration_deferred && !dismissed.deferred;
-  const showMigrated = !!health?.migrated_from_plaintext && !dismissed.migrated;
-
   return (
     <div className="settings">
       <div className="settings-header" data-tauri-drag-region>
         <button className="back-btn" onClick={onBack}>
           ← 返回
         </button>
-        <button className="save-btn-header" onClick={handleSave} disabled={saving}>
-          {saving ? '保存中...' : '保存'}
-        </button>
       </div>
       {message && <div className="save-toast">{message}</div>}
 
       <div className="settings-body">
-        {/* 配置健康提示 */}
-        {showUnreadable && (
-          <div style={BANNER_TONE.danger} role="alert">
-            <span style={BANNER_TITLE}>⚠ 检测到本机无法解密的配置文件</span>
-            {health?.backup_path ? (
-              <span>
-                原文件已备份为 <strong>{basename(health.backup_path)}</strong>
-                ，继续保存将写入新配置；如需恢复原密钥，请回到原设备或联系支持。
-              </span>
-            ) : (
-              <span>
-                原文件目前未被修改；若继续保存，会先自动将原文件备份后再写入新配置。
-                如需恢复原密钥，请回到原设备或联系支持。
-              </span>
-            )}
-            <br />
-            <span>当前页面展示的是默认空配置（并非你的密钥已丢失）。</span>
-            <button
-              style={BANNER_CLOSE}
-              onClick={() => dismiss('unreadable')}
-              aria-label="关闭提示"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {showDeferred && (
-          <div style={BANNER_TONE.warn}>
-            <span style={BANNER_TITLE}>配置的加密升级已暂缓</span>
-            <span>
-              当前无法获取本机稳定的硬件标识，为避免将密钥绑定到不稳定的标识上，
-              明文配置的加密升级已暂缓；应用功能不受影响，下次启动若标识恢复可用会自动完成升级。
-            </span>
-            <button style={BANNER_CLOSE} onClick={() => dismiss('deferred')} aria-label="关闭提示">
-              ×
-            </button>
-          </div>
-        )}
-
-        {showMigrated && (
-          <div style={BANNER_TONE.info}>
-            <span style={BANNER_TITLE}>配置已升级为机器绑定加密存储</span>
-            <span>
-              配置已升级为机器绑定的加密存储（原明文已安全擦除）。
-              注意：回退到旧版本将无法读取该配置，换机或重装系统后需重新录入密钥。
-            </span>
-            <button style={BANNER_CLOSE} onClick={() => dismiss('migrated')} aria-label="关闭提示">
-              ×
-            </button>
-          </div>
-        )}
-
         {/* 状态栏显示 */}
         <div className="settings-section">
-          <h3>状态栏显示</h3>
           <div className="tray-display-card">
             <div className="update-row">
-              <span className="update-row-label">在菜单栏图标旁显示指标文字</span>
+              <span className="update-row-label">菜单栏显示指标</span>
               <label className="toggle">
                 <input
                   type="checkbox"
@@ -416,174 +202,100 @@ function Settings({ onBack }: SettingsProps) {
                 />
               </label>
             </div>
-            {config.tray_text_enabled && (
-              <div className="tray-provider-list">
-                {config.providers
-                  .map((p, i) => ({ p, i }))
-                  .filter(({ p }) => p.enabled)
-                  .map(({ p, i }) => (
-                    <label key={`${p.name}-${p.alias || i}`} className="tray-provider-row">
-                      <input
-                        type="checkbox"
-                        checked={p.show_in_tray}
-                        disabled={trayBusy}
-                        onChange={(e) =>
-                          applyTrayDisplay({
-                            providerIndex: i,
-                            providerName: p.name,
-                            value: e.target.checked,
-                          })
-                        }
-                      />
-                      <span>{p.alias?.trim() || providerLabel(p.name)}</span>
-                    </label>
-                  ))}
-              </div>
-            )}
+            <div className={`tray-provider-list${config.tray_text_enabled ? '' : ' is-disabled'}`}>
+              {config.providers
+                .map((p, i) => ({ p, i }))
+                .filter(({ p }) => p.enabled)
+                .map(({ p, i }) => (
+                  <label key={`${p.name}-${p.alias || i}`} className="tray-provider-row">
+                    <input
+                      type="checkbox"
+                      checked={p.show_in_tray}
+                      disabled={trayBusy || !config.tray_text_enabled}
+                      onChange={(e) =>
+                        applyTrayDisplay({
+                          providerIndex: i,
+                          providerName: p.name,
+                          value: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{p.alias?.trim() || providerLabel(p.name)}</span>
+                  </label>
+                ))}
+            </div>
             <span className="update-hint">
-              开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标；也可对单个服务商关闭常显。
+              开关即时生效，无需保存。关闭总开关后菜单栏仅显示图标，下方供应商选项随之禁用仅供预览；也可对单个服务商关闭常显。
+            </span>
+          </div>
+          {/* 点击行为：左键直接打开主页（右键始终弹详情菜单） */}
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">点击图标打开主页</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={config.tray_click_opens_window}
+                  disabled={trayClickBusy}
+                  onChange={(e) => applyTrayClickBehavior(e.target.checked)}
+                />
+              </label>
+            </div>
+            <span className="update-hint">
+              开启后左键点击图标直接打开主窗口，右键仍可打开详情菜单；关闭时点击显示详情菜单（默认）。开关即时生效。
             </span>
           </div>
         </div>
 
         {/* 低余额通知 */}
         <div className="settings-section">
-          <h3>低余额通知</h3>
           <div className="tray-display-card">
             <div className="update-row">
-              <span className="update-row-label">余额/配额告警恶化时弹系统通知</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={config.notifications_enabled}
-                  disabled={notifBusy}
-                  onChange={(e) => applyNotificationEnabled(e.target.checked)}
-                />
-              </label>
-            </div>
-            <div className="update-row">
-              <span className="update-row-label">验证通知链路是否打通</span>
-              <button
-                className="cancel-btn"
-                onClick={sendTestNotification}
-                disabled={testNotifyBusy}
-              >
-                {testNotifyBusy ? '发送中...' : '发送测试通知'}
-              </button>
+              <span className="update-row-label">余额告警逐级通知</span>
+              <div className="update-row-actions">
+                <button
+                  className="cancel-btn"
+                  onClick={sendTestNotification}
+                  disabled={testNotifyBusy}
+                >
+                  {testNotifyBusy ? '发送中...' : '发送测试通知'}
+                </button>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.notifications_enabled}
+                    disabled={notifBusy}
+                    onChange={(e) => applyNotificationEnabled(e.target.checked)}
+                  />
+                </label>
+              </div>
             </div>
             <span className="update-hint">
-              开关即时生效，无需保存。告警从无到有、或紧张升级为耗尽的时刻各提醒一次；恢复后再次恶化会再次提醒。
-              能否收到取决于系统通知权限（设置 → 通知），建议用测试通知自证。
+              开关即时生效。告警恶化时提醒一次，恢复后再次恶化会再提醒；收不到请检查系统通知权限。
             </span>
           </div>
         </div>
 
-        {/* 服务商配置 */}
+        {/* 背景 */}
         <div className="settings-section">
-          <h3>服务商</h3>
-          {config.providers.map((p, i) => (
-            <div key={`${p.name}-${p.alias || i}`} className="provider-config">
-              <div className="provider-config-header">
-                <select
-                  value={p.name}
-                  onChange={(e) => handleProviderNameChange(i, e.target.value)}
-                >
-                  {PROVIDER_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={p.enabled}
-                    onChange={(e) => updateProvider(i, 'enabled', e.target.checked)}
-                  />
-                </label>
-                {deletingIndex === i ? (
-                  <>
-                    <span className="delete-confirm-text">确定?</span>
-                    <button
-                      className="remove-btn remove-btn-confirm"
-                      onClick={() => removeProvider(i)}
-                    >
-                      确定
-                    </button>
-                    <button className="cancel-btn" onClick={() => setDeletingIndex(null)}>
-                      取消
-                    </button>
-                  </>
-                ) : (
-                  <button className="remove-btn" onClick={() => setDeletingIndex(i)}>
-                    删除
-                  </button>
-                )}
-              </div>
-              <div className="provider-fields">
+          <h3>背景</h3>
+          <div className="tray-display-card">
+            <div className="update-row">
+              <span className="update-row-label">固定背景（不随桌面壁纸变化）</span>
+              <label className="toggle">
                 <input
-                  type="text"
-                  placeholder={`别名（默认「${providerLabel(p.name)}」）`}
-                  value={p.alias || ''}
-                  onChange={(e) => updateProvider(i, 'alias', e.target.value)}
+                  type="checkbox"
+                  checked={background.mode === 'frozen'}
+                  disabled={background.busy || backgroundBusy}
+                  onChange={(e) => applyBackgroundMode(e.target.checked)}
                 />
-                {p.name === 'Qoder' ? (
-                  // Qoder 双认证路径（qoder.rs）：api_key 留空 = 本机客户端凭据（主路径），
-                  // 填写 PAT = 令牌兜底。所有平台都放行 PAT 输入：macOS 上客户端未登录或
-                  // 钥匙串授权被拒时兜底仍可用，已存的失效 PAT 也能在此清空并保存恢复主路径
-                  <>
-                    <input
-                      type="password"
-                      placeholder={
-                        IS_MAC
-                          ? 'PAT 个人访问令牌（可选，留空自动读取客户端凭据）'
-                          : 'PAT 个人访问令牌'
-                      }
-                      value={p.api_key}
-                      onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
-                    />
-                    <span className="ds-hint">
-                      {IS_MAC
-                        ? '留空自动读取本机 Qoder / Qoder CN 客户端登录凭据（需已登录，首次弹窗请点允许）；读取失败可改填 PAT，清空并保存即恢复自动读取'
-                        : '本地凭据读取暂仅支持 macOS，请填写 PAT 作为凭据来源'}
-                    </span>
-                  </>
-                ) : KEYLESS_PROVIDERS.has(p.name) ? (
-                  <span className="ds-hint">
-                    {p.name === 'Codex'
-                      ? '自动从 ~/.codex/auth.json 读取凭证'
-                      : p.name === 'Claude Code'
-                        ? '自动从 ~/.claude/credentials.json 读取凭证'
-                        : '自动从 ~/.kimi-code/config.toml 读取凭证'}
-                  </span>
-                ) : (
-                  <input
-                    type="password"
-                    placeholder="API Key"
-                    value={p.api_key}
-                    onChange={(e) => updateProvider(i, 'api_key', e.target.value)}
-                  />
-                )}
-                {(p.name === 'OpenAI' || p.name === 'Anthropic') && (
-                  <span className="ds-hint">需组织管理员密钥（Admin Key）</span>
-                )}
-                {p.name === 'DeepSeek' && (
-                  <>
-                    <input
-                      type="password"
-                      placeholder="平台 Token（可选，查看今日用量）"
-                      value={p.platform_token || ''}
-                      onChange={(e) => updateProvider(i, 'platform_token', e.target.value)}
-                    />
-                    <span className="ds-hint">从 platform.deepseek.com 登录后获取</span>
-                  </>
-                )}
-              </div>
+              </label>
             </div>
-          ))}
-          <button className="add-btn" onClick={addProvider}>
-            + 添加服务商
-          </button>
+            <span className="update-hint">
+              开关即时生效。开启后使用内置的固定背景图，桌面壁纸怎么换都不影响本窗口配色；
+              关闭后恢复实时半透明（跟随系统桌面）。
+            </span>
+          </div>
         </div>
       </div>
     </div>

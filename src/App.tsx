@@ -3,14 +3,17 @@ import { getVersion } from '@tauri-apps/api/app';
 import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
+import Providers from './components/Providers';
 import UpdateNotice from './components/UpdateNotice';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
+import { useFrozenBackground } from './hooks/useFrozenBackground';
 
 function App() {
-  const [view, setView] = useState<'usage' | 'settings'>('usage');
-  const { summary, loading, refreshing, error, refresh } = useUsage();
+  const [view, setView] = useState<'usage' | 'settings' | 'providers'>('usage');
+  const { summary, loading, refreshing, error, refresh, refreshAfterProviderChange } = useUsage();
+  const background = useFrozenBackground();
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,6 +35,12 @@ function App() {
 
   return (
     <ErrorBoundary>
+      {background.imageUrl && (
+        <div
+          className="background-frozen"
+          style={{ backgroundImage: `url(${background.imageUrl})` }}
+        />
+      )}
       <div className="app">
         {view === 'usage' ? (
           <div className="usage-view">
@@ -70,6 +79,25 @@ function App() {
                 </button>
                 <button
                   className="settings-icon-btn"
+                  onClick={() => setView('providers')}
+                  title="供应商配置"
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                </button>
+                <button
+                  className="settings-icon-btn"
                   onClick={() => setView('settings')}
                   title="设置"
                 >
@@ -98,8 +126,17 @@ function App() {
               refresh={refresh}
             />
           </div>
+        ) : view === 'settings' ? (
+          <Settings onBack={() => setView('usage')} background={background} />
         ) : (
-          <Settings onBack={() => setView('usage')} />
+          <Providers
+            onBack={() => {
+              setView('usage');
+              // 乐观显示：新供应商行立即出现在面板上（行内「加载中」），
+              // 真实数据由随后的刷新轮补齐——慢供应商也能马上确认添加成功
+              refreshAfterProviderChange();
+            }}
+          />
         )}
         {appVersion && <div className="version-tag">v{appVersion}</div>}
       </div>

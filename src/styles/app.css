@@ -34,6 +34,8 @@
   flex-direction: column;
   height: 100vh;
   background: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 /* ===== Header with settings icon ===== */
@@ -615,7 +617,18 @@ input:focus, select:focus {
   gap: 6px;
 }
 
-.provider-config-header select { flex: 1; }
+/* 下拉/别名定宽后，启用开关与删除按钮仍锚定行尾（空隙留在中间） */
+.provider-config-header .toggle { margin-left: auto; }
+
+/* 供应商下拉与别名同行：下拉保持别名的 1.5 倍宽（240px），不占满整行 */
+.provider-config-header select { flex: 0 0 240px; }
+
+/* 别名紧挨下拉，固定窄宽；留空回退供应商默认名 */
+.provider-config-header .alias-input { flex: 0 0 160px; }
+
+/* 原生 select 渲染高度比文本输入矮一截，统一高度对齐 */
+.provider-config-header select,
+.provider-config-header .alias-input { height: 30px; }
 
 .toggle {
   display: flex;
@@ -810,6 +823,20 @@ input:focus, select:focus {
   border: 1px solid var(--system-separator);
 }
 
+/* 同区块内两张托盘卡片之间的留白 */
+.settings-section .tray-display-card + .tray-display-card {
+  margin-top: 12px;
+}
+
+/* 总开关关闭时供应商列表禁用仅供预览 */
+.tray-provider-list.is-disabled {
+  opacity: 0.45;
+}
+
+.tray-provider-list.is-disabled .tray-provider-row {
+  cursor: default;
+}
+
 .tray-provider-list {
   display: flex;
   flex-wrap: wrap;
@@ -835,6 +862,13 @@ input:focus, select:focus {
   justify-content: space-between;
 }
 
+/* update-row 右端动作编组（如「发送测试通知」按钮 + 开关），整体靠右 */
+.update-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .update-row-label {
   font-size: 13px;
   color: var(--system-secondary-label);
@@ -858,4 +892,20 @@ input:focus, select:focus {
   pointer-events: none;
   user-select: none;
   z-index: 10;
+}
+
+/* ===== 背景固化：固定背景层与截取捕获态 ===== */
+
+/* 固定背景层：铺截取的「半透明背景」图（含材质观感），压在窗口材质之上、
+   全部内容之下。截图像素已含窗口圆角外的桌背内容，故按窗口圆角裁掉，
+   保持今天的透明圆角观感（半径与实机窗口圆角对齐，走查校准）。 */
+.background-frozen {
+  position: fixed;
+  inset: 0;
+  background-position: center;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 0;
 }

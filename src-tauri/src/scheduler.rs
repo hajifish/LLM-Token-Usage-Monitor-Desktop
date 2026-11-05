@@ -900,11 +900,18 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             critical_ok &= menu.append(&update_item).is_ok();
         }
 
-        // 6) 分隔线 → 退出（主窗口头部已有设置入口，托盘不再重复）
+        // 6) 分隔线 → 设置 → 退出（设置直达设置页；退出仍是末项，Accessory 模式唯一出口）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;
         };
         critical_ok &= menu.append(&separator2).is_ok();
+
+        let Ok(settings_item) =
+            MenuItem::with_id(app_handle, "open-settings", "设置", true, None::<&str>)
+        else {
+            return;
+        };
+        critical_ok &= menu.append(&settings_item).is_ok();
 
         let Ok(quit_item) =
             MenuItem::with_id(app_handle, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)

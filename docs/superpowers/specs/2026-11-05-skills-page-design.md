@@ -98,7 +98,7 @@ pub fn list_skills(agent: String) -> Result<Vec<SkillEntry>, String>
   - 「用户目录 (N)」:`~/.<agent>/skills` 下的散装 skill,网格直铺
   - 「插件下载(K 个插件)」:**按插件折叠分组**——每插件一行(插件名 + 一句话简介 + 数量胶囊,技能多者在前),默认收起,点击展开该组网格;搜索时强制展开
   - 不做「自建/官方下载」标记:`~/.claude/skills` 下对话创建与按请求下载的 skill 落盘无任何元数据可区分(实测 grill-me 在 installed_plugins/marketplaces/catalog 均无记录)
-- **中文化**:插件简介与 skill 描述经静态词典(`src/i18n/{plugins,skills}-zh.json`,键 `org/plugin`、`plugin:skill`)显示中文;无词条回退英文原文,零运行时成本;插件更新后需重新生成词典
+- **中文化(本地覆盖,不随包分发)**:插件简介与 skill 描述可经用户本地翻译覆盖显示中文——`{应用数据目录}/skills-i18n/{plugins,skills}-zh.json`(键 `org/plugin`、`plugin:skill`),`get_skill_i18n` 命令读取;文件缺失(其他用户首次安装)或词条未覆盖 → 回退英文原文。**仓库不携带任何机器特定的词典数据**(打包快照对其他用户的插件集合无意义);需要中文的用户自行放置/生成覆盖文件
 - 空态:区分「无 skill」与「加载失败」;每个 tab 独立呈现
 
 ## 错误处理汇总

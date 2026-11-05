@@ -140,3 +140,15 @@ export interface SkillEntry {
   /** SKILL.md 绝对路径（详情展示）。 */
   path: string;
 }
+
+/**
+ * 中文翻译覆盖 —— 与 Rust `skills::SkillI18n` 严格一致（snake_case）。
+ * 来自用户本地 {应用数据目录}/skills-i18n/*.json（可选文件，不随包分发）；
+ * 首次安装/未配置时为空表，界面回退英文原文。
+ */
+export interface SkillI18n {
+  /** 插件简介：键 "org/plugin"。 */
+  plugins: Record<string, string>;
+  /** skill 描述：键 "plugin:skill"。 */
+  skills: Record<string, string>;
+}

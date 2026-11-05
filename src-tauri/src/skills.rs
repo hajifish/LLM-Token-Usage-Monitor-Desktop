@@ -294,6 +294,47 @@ fn scan_plugin_skills(config_dir: &Path, agent: &str) -> Vec<SkillEntry> {
     scan_plugin_cache(config_dir)
 }
 
+/// 中文翻译覆盖(用户本地可选文件,不随包分发)。
+/// 键与前端约定:plugins 为 "org/plugin",skills 为 "plugin:skill"。
+#[derive(Serialize, Debug, Default, Clone, PartialEq)]
+pub struct SkillI18n {
+    pub plugins: std::collections::HashMap<String, String>,
+    pub skills: std::collections::HashMap<String, String>,
+}
+
+/// 读 <dir>/plugins-zh.json 与 <dir>/skills-zh.json:
+/// 目录或文件缺失 → 该部分为空(英文原文兜底);单文件解析失败 →
+/// log::warn 后忽略该文件,不影响另一份。
+fn read_i18n_dir(dir: &Path) -> SkillI18n {
+    let mut out = SkillI18n::default();
+    let files: [(&str, &mut std::collections::HashMap<String, String>); 2] = [
+        ("plugins-zh.json", &mut out.plugins),
+        ("skills-zh.json", &mut out.skills),
+    ];
+    for (file, target) in files {
+        let p = dir.join(file);
+        let Ok(content) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        match serde_json::from_str(&content) {
+            Ok(m) => *target = m,
+            Err(e) => log::warn!("Skills: 解析 {} 失败,忽略该文件: {e}", p.display()),
+        }
+    }
+    out
+}
+
+/// 用户本地翻译覆盖入口:应用数据目录下 skills-i18n/。
+/// 不存在(首次安装)返回空表——其他用户不会看到本机快照数据。
+#[tauri::command]
+pub fn get_skill_i18n(app: tauri::AppHandle) -> SkillI18n {
+    use tauri::Manager;
+    match app.path().app_data_dir() {
+        Ok(dir) => read_i18n_dir(&dir.join("skills-i18n")),
+        Err(_) => SkillI18n::default(),
+    }
+}
+
 /// agent 合法值与各自的家目录配置目录名
 const AGENT_DIRS: &[(&str, &str)] = &[("claude", ".claude"), ("codex", ".codex")];
 
@@ -551,5 +592,42 @@ mod skills_tests {
     #[test]
     fn list_skills_rejects_unknown_agent() {
         assert!(list_skills("cursor".to_string()).is_err());
+    }
+
+    // ---- 本地翻译覆盖 ----
+
+    #[test]
+    fn read_i18n_dir_parses_both_files() {
+        let s = ScratchDir::new("i18n");
+        let dir = s.path().join("skills-i18n");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugins-zh.json"), r#"{"org-a/p":"简介"}"#).unwrap();
+        std::fs::write(dir.join("skills-zh.json"), r#"{"p:sk":"描述"}"#).unwrap();
+        let i18n = read_i18n_dir(&dir);
+        assert_eq!(
+            i18n.plugins.get("org-a/p").map(String::as_str),
+            Some("简介")
+        );
+        assert_eq!(i18n.skills.get("p:sk").map(String::as_str), Some("描述"));
+    }
+
+    #[test]
+    fn read_i18n_dir_missing_or_corrupt_falls_back_to_empty() {
+        // 目录整体不存在(其他用户首次安装):空表
+        let s = ScratchDir::new("i18n-missing");
+        assert_eq!(
+            read_i18n_dir(&s.path().join("skills-i18n")),
+            SkillI18n::default()
+        );
+
+        // 一份损坏 + 一份正常:损坏的忽略,正常的不受影响
+        let s2 = ScratchDir::new("i18n-corrupt");
+        let dir = s2.path().join("skills-i18n");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugins-zh.json"), "{坏 json").unwrap();
+        std::fs::write(dir.join("skills-zh.json"), r#"{"p:sk":"描述"}"#).unwrap();
+        let i18n = read_i18n_dir(&dir);
+        assert!(i18n.plugins.is_empty());
+        assert_eq!(i18n.skills.get("p:sk").map(String::as_str), Some("描述"));
     }
 }

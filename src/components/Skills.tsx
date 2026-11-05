@@ -1,20 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { SkillEntry } from '../types';
-// 静态中文词典(随包分发;插件更新/新装未覆盖时回退英文原文)
-import pluginsZh from '../i18n/plugins-zh.json';
-import skillsZh from '../i18n/skills-zh.json';
-
-const pluginsZhMap = pluginsZh as Record<string, string>;
-const skillsZhMap = skillsZh as Record<string, string>;
-
-/** skill 描述的中文展示(词典键 plugin:skill;无词条回退原文) */
-const zhSkillDesc = (s: SkillEntry) =>
-  (s.plugin_name && skillsZhMap[`${s.plugin_name}:${s.name}`]) || s.description;
-
-/** 插件组描述:词典优先("org/plugin" 全键),回退 plugin.json 原文 */
-const zhPluginDesc = (key: string, fallback: string) => pluginsZhMap[key] || fallback;
+import type { SkillEntry, SkillI18n } from '../types';
 
 type Agent = 'claude' | 'codex';
 
@@ -105,13 +92,26 @@ function Skills({ onBack }: SkillsProps) {
   const [hovered, setHovered] = useState<{ skill: SkillEntry; rect: DOMRect } | null>(null);
   /** 已展开的插件组(插件名);不在表内 = 收起。默认全收起,搜索时强制展开 */
   const [expandedPlugins, setExpandedPlugins] = useState<Record<string, boolean>>({});
+  /** 本地中文翻译覆盖({应用数据目录}/skills-i18n/,用户可选;空表=英文原文) */
+  const [i18n, setI18n] = useState<SkillI18n>({ plugins: {}, skills: {} });
+
+  /** skill 描述的中文展示(键 plugin:skill;无词条回退原文) */
+  const zhSkillDesc = (s: SkillEntry) =>
+    (s.plugin_name && i18n.skills[`${s.plugin_name}:${s.name}`]) || s.description;
 
   // 全部 setState 都在异步回调里(effect 内同步 setState 会触发
   // react-hooks/set-state-in-effect);切换时的「扫描中」由 switchAgent 置空实现
   const load = useCallback((a: Agent) => {
-    invoke<SkillEntry[]>('list_skills', { agent: a })
-      .then((list) => {
+    Promise.all([
+      invoke<SkillEntry[]>('list_skills', { agent: a }),
+      // 覆盖文件缺失属正常路径,不作为错误打扰页面
+      invoke<SkillI18n>('get_skill_i18n').catch(
+        (): SkillI18n => ({ plugins: {}, skills: {} }),
+      ),
+    ])
+      .then(([list, overrides]) => {
         setSkills(list);
+        setI18n(overrides);
         setError('');
       })
       .catch((e) => {
@@ -139,13 +139,13 @@ function Skills({ onBack }: SkillsProps) {
     if (!skills) return [];
     const q = query.trim().toLowerCase();
     if (!q) return skills;
-    // 中文词典与英文原文都可命中(用户看到的与记到的都可能任一语言)
+    // 中文覆盖与英文原文都可命中(用户看到的与记到的都可能任一语言)
     return skills.filter((s) =>
       [s.name, s.description, zhSkillDesc(s), s.plugin_name ?? ''].some((v) =>
         v.toLowerCase().includes(q),
       ),
     );
-  }, [skills, query]);
+  }, [skills, query, i18n]);
 
   const userSkills = filtered.filter((s) => s.source === 'user');
   const pluginSkills = filtered.filter((s) => s.source === 'plugin');
@@ -167,11 +167,12 @@ function Skills({ onBack }: SkillsProps) {
         key,
         name: group[0].plugin_name ?? '其他',
         org: group[0].plugin_org ?? '',
-        desc: zhPluginDesc(key, group[0].plugin_description ?? ''),
+        desc: i18n.plugins[key] || group[0].plugin_description || '',
         group,
       }))
       .sort((a, b) => b.group.length - a.group.length || a.name.localeCompare(b.name));
-  }, [pluginSkills]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n 经 zhSkillDesc/group desc 使用
+  }, [pluginSkills, i18n]);
 
   /** 搜索中强制展开所有组:命中项藏在收起组里会让搜索看起来失灵 */
   const searching = query.trim() !== '';

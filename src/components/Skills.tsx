@@ -1,31 +1,98 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { SkillEntry } from '../types';
 
 type Agent = 'claude' | 'codex';
 
-const AGENTS: { key: Agent; label: string }[] = [
-  { key: 'claude', label: 'Claude Code' },
-  { key: 'codex', label: 'Codex' },
+/** Claude 星芒标记(品牌橙由 tab active 态着色) */
+function ClaudeMark() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+    >
+      <line x1="12" y1="4" x2="12" y2="20" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="6.2" y1="6.2" x2="8.4" y2="8.4" />
+      <line x1="17.8" y1="6.2" x2="15.6" y2="8.4" />
+      <line x1="6.2" y1="17.8" x2="8.4" y2="15.6" />
+      <line x1="17.8" y1="17.8" x2="15.6" y2="15.6" />
+    </svg>
+  );
+}
+
+/** OpenAI 六瓣花结标记(Codex) */
+function CodexMark() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    >
+      {[0, 60, 120, 180, 240, 300].map((deg) => (
+        <path
+          key={deg}
+          d="M12 2.6 L13.9 8.4 L12 10 L10.1 8.4 Z"
+          transform={`rotate(${deg} 12 12)`}
+        />
+      ))}
+    </svg>
+  );
+}
+
+const AGENTS: { key: Agent; label: string; Icon: () => JSX.Element }[] = [
+  { key: 'claude', label: 'Claude Code', Icon: ClaudeMark },
+  { key: 'codex', label: 'Codex', Icon: CodexMark },
 ];
 
 interface SkillsProps {
   onBack: () => void;
 }
 
+/** 悬浮详情弹窗尺寸(fixed 定位,用卡片矩形计算落点) */
+const POPOVER_W = 300;
+const POPOVER_MAX_H = 280;
+
+/** 弹窗落在卡片正下方;下方空间不足时翻到上方;左右收进窗口内 */
+function popoverStyle(rect: DOMRect): CSSProperties {
+  const x = Math.min(
+    Math.max(rect.left + rect.width / 2 - POPOVER_W / 2, 8),
+    window.innerWidth - POPOVER_W - 8,
+  );
+  const below = rect.bottom + 8;
+  const y =
+    below + POPOVER_MAX_H <= window.innerHeight
+      ? below
+      : Math.max(rect.top - POPOVER_MAX_H - 8, 8);
+  return { left: x, top: y, width: POPOVER_W, maxHeight: POPOVER_MAX_H };
+}
+
 /**
- * Skill 清单页：只读浏览本机 Claude Code / Codex 的 skill（自建 + 插件下载）。
- * 入口为主页 header 图标（App.tsx）。切 tab / 手动刷新时重新扫描，
- * 本地 IO 毫秒级，刻意不缓存——数据永远新鲜。
+ * Skill 清单页:只读浏览本机 Claude Code / Codex 的 skill(自建 + 插件下载)。
+ * 入口为主页 header 图标(App.tsx)。切 tab / 手动刷新时重新扫描,
+ * 本地 IO 毫秒级,刻意不缓存——数据永远新鲜。
+ * 卡片只放关键信息,完整情况悬停弹出详情(不点击)。
  */
 function Skills({ onBack }: SkillsProps) {
   const [agent, setAgent] = useState<Agent>('claude');
   const [skills, setSkills] = useState<SkillEntry[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
+  /** 悬停中的卡片(skill + 卡片矩形),驱动 fixed 定位详情弹窗 */
+  const [hovered, setHovered] = useState<{ skill: SkillEntry; rect: DOMRect } | null>(null);
 
-  // 全部 setState 都在异步回调里（effect 内同步 setState 会触发
-  // react-hooks/set-state-in-effect）；切换时的「扫描中」由 switchAgent 置空实现
+  // 全部 setState 都在异步回调里(effect 内同步 setState 会触发
+  // react-hooks/set-state-in-effect);切换时的「扫描中」由 switchAgent 置空实现
   const load = useCallback((a: Agent) => {
     invoke<SkillEntry[]>('list_skills', { agent: a })
       .then((list) => {
@@ -33,20 +100,21 @@ function Skills({ onBack }: SkillsProps) {
         setError('');
       })
       .catch((e) => {
-        // 后端错误（参数非法/取不到主目录）对用户可观测
+        // 后端错误(参数非法/取不到主目录)对用户可观测
         setSkills([]);
         setError(String(e));
       });
   }, []);
 
-  // 进入页面 / 切换 tab：重新扫描（本地毫秒级，刻意不缓存）
+  // 进入页面 / 切换 tab:重新扫描(本地毫秒级,刻意不缓存)
   useEffect(() => {
     load(agent);
   }, [agent, load]);
 
-  // 同步重置在事件处理器里做：立即显示「扫描中…」，再触发 effect 加载
+  // 同步重置在事件处理器里做:立即显示「扫描中…」,再触发 effect 加载
   const switchAgent = (a: Agent) => {
     if (a === agent) return;
+    setHovered(null);
     setSkills(null);
     setAgent(a);
   };
@@ -63,18 +131,16 @@ function Skills({ onBack }: SkillsProps) {
   const userSkills = filtered.filter((s) => s.source === 'user');
   const pluginSkills = filtered.filter((s) => s.source === 'plugin');
 
-  /** 卡片只放关键信息：名称 + 描述（截断）+ 来源标记（自建 / 插件名） */
+  /** 卡片只放关键信息:名称 + 描述(截断);悬停看完整详情 */
   const renderCard = (s: SkillEntry) => (
-    <div key={`${s.source}:${s.path}`} className="skill-card">
-      <span className="skill-card-name" title={s.name}>
-        {s.name}
-      </span>
-      <p className="skill-card-desc" title={s.description}>
-        {s.description}
-      </p>
-      <span className={`skill-card-badge ${s.source}`}>
-        {s.source === 'user' ? '自建' : s.plugin_name}
-      </span>
+    <div
+      key={`${s.source}:${s.path}`}
+      className="skill-card"
+      onMouseEnter={(e) => setHovered({ skill: s, rect: e.currentTarget.getBoundingClientRect() })}
+      onMouseLeave={() => setHovered(null)}
+    >
+      <span className="skill-card-name">{s.name}</span>
+      <p className="skill-card-desc">{s.description}</p>
     </div>
   );
 
@@ -86,13 +152,15 @@ function Skills({ onBack }: SkillsProps) {
         </button>
         <span className="skills-title">Skills</span>
         <div className="skills-tabs">
-          {AGENTS.map((a) => (
+          {AGENTS.map(({ key, label, Icon }) => (
             <button
-              key={a.key}
-              className={`skills-tab${agent === a.key ? ' active' : ''}`}
-              onClick={() => switchAgent(a.key)}
+              key={key}
+              className={`skills-tab ${key}${agent === key ? ' active' : ''}`}
+              onClick={() => switchAgent(key)}
+              title={label}
+              aria-label={label}
             >
-              {a.label}
+              <Icon />
             </button>
           ))}
         </div>
@@ -132,13 +200,13 @@ function Skills({ onBack }: SkillsProps) {
           <>
             {userSkills.length > 0 && (
               <div className="settings-section">
-                <h3>自建 ({userSkills.length})</h3>
+                <h3>用户目录 ({userSkills.length})</h3>
                 <div className="skills-grid">{userSkills.map(renderCard)}</div>
               </div>
             )}
             {pluginSkills.length > 0 && (
               <div className="settings-section">
-                <h3>插件 ({pluginSkills.length})</h3>
+                <h3>插件下载 ({pluginSkills.length})</h3>
                 <div className="skills-grid">{pluginSkills.map(renderCard)}</div>
               </div>
             )}
@@ -148,6 +216,29 @@ function Skills({ onBack }: SkillsProps) {
           </>
         )}
       </div>
+
+      {/* 悬停详情弹窗:pointer-events:none 纯提示不拦截鼠标,避免滑入时闪烁 */}
+      {hovered && (
+        <div className="skill-popover" style={popoverStyle(hovered.rect)} role="tooltip">
+          <div className="skill-popover-name">{hovered.skill.name}</div>
+          {hovered.skill.description && (
+            <p className="skill-popover-desc">{hovered.skill.description}</p>
+          )}
+          {hovered.skill.plugin_name && (
+            <div className="skill-popover-meta">
+              <span className="skill-popover-label">插件</span>
+              <span>
+                {hovered.skill.plugin_name}
+                {hovered.skill.plugin_org ? `（${hovered.skill.plugin_org}）` : ''}
+              </span>
+            </div>
+          )}
+          <div className="skill-popover-meta">
+            <span className="skill-popover-label">路径</span>
+            <span className="skill-popover-path">{hovered.skill.path}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

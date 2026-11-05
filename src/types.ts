@@ -120,3 +120,21 @@ export interface ConfigHealth {
   /** 本次启动已完成明文→密文迁移（原明文已被加密信封安全替换）。 */
   migrated_from_plaintext: boolean;
 }
+
+/**
+ * 单个 skill 条目 —— 与 Rust `skills::SkillEntry` 严格一致（snake_case）。
+ */
+export interface SkillEntry {
+  /** frontmatter name，缺失时回退目录名。 */
+  name: string;
+  /** frontmatter description，解析失败为空串。 */
+  description: string;
+  /** "user"（自建）| "plugin"（插件下载）。 */
+  source: 'user' | 'plugin';
+  /** 插件名（superpowers 等）；自建为 null。 */
+  plugin_name: string | null;
+  /** 插件来源组织（claude-plugins-official / openai-curated 等）；自建为 null。 */
+  plugin_org: string | null;
+  /** SKILL.md 绝对路径（详情展示）。 */
+  path: string;
+}

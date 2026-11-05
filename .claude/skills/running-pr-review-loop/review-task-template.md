@@ -34,6 +34,10 @@ You are the designated PR reviewer for {{PR_URL}} (branch {{BRANCH}} → {{BASE_
 - CI green + no conflicts with {{BASE_BRANCH}}
 - Do not re-litigate style choices already locked by the specs unless they cause real defects
 
+## Review checklist source (pstack backbone)
+
+The review environment uses pstack as its workflow backbone (superpowers was removed 2026-11-05; do not reference its skills). If the Skill tool lists pstack skills in this session, load `pstack:thermo-nuclear-review` first and apply its checklist to this diff (fall back to the focus list above if unavailable — never block on it). Measure comment quality against `pstack:no-comments`; findings that are pure comment-style nitpicks go under 建议 (optional), never 严重.
+
 ## Environment
 
 - gh CLI is authenticated. Work from {{REPO_ROOT}}.

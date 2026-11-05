@@ -954,6 +954,48 @@ input:focus, select:focus {
   margin-bottom: 12px;
 }
 
+/* 插件分组:一行标题(插件名+数量)可折叠,展开才铺卡片网格 */
+.plugin-group {
+  margin-bottom: 4px;
+}
+.plugin-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--system-secondary-label);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+.plugin-group-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--system-label);
+}
+.plugin-group-caret {
+  font-size: 10px;
+  color: var(--system-tertiary-label);
+}
+.plugin-group-name {
+  font-weight: 600;
+}
+.plugin-group-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--system-tertiary-label);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+  padding: 0 8px;
+}
+.plugin-group .skills-grid {
+  margin: 2px 0 10px 10px;
+}
+
 /* skill 卡片网格：一行 5 个，铺满内容区 */
 .skills-grid {
   display: grid;

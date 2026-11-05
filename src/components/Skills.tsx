@@ -90,6 +90,8 @@ function Skills({ onBack }: SkillsProps) {
   const [query, setQuery] = useState('');
   /** 悬停中的卡片(skill + 卡片矩形),驱动 fixed 定位详情弹窗 */
   const [hovered, setHovered] = useState<{ skill: SkillEntry; rect: DOMRect } | null>(null);
+  /** 已展开的插件组(插件名);不在表内 = 收起。默认全收起,搜索时强制展开 */
+  const [expandedPlugins, setExpandedPlugins] = useState<Record<string, boolean>>({});
 
   // 全部 setState 都在异步回调里(effect 内同步 setState 会触发
   // react-hooks/set-state-in-effect);切换时的「扫描中」由 switchAgent 置空实现
@@ -116,6 +118,7 @@ function Skills({ onBack }: SkillsProps) {
     if (a === agent) return;
     setHovered(null);
     setSkills(null);
+    setExpandedPlugins({});
     setAgent(a);
   };
 
@@ -130,6 +133,27 @@ function Skills({ onBack }: SkillsProps) {
 
   const userSkills = filtered.filter((s) => s.source === 'user');
   const pluginSkills = filtered.filter((s) => s.source === 'plugin');
+
+  /** 插件按归属分组(技能多的在前,同数按名排),每组可折叠——
+   平铺 90+ 张卡片看不出哪些属于 pstack、哪些属于 superpowers */
+  const pluginGroups = useMemo(() => {
+    const map = new Map<string, SkillEntry[]>();
+    for (const s of pluginSkills) {
+      const key = s.plugin_name ?? '其他';
+      const arr = map.get(key);
+      if (arr) arr.push(s);
+      else map.set(key, [s]);
+    }
+    return [...map.entries()].sort(
+      ([an, a], [bn, b]) => b.length - a.length || an.localeCompare(bn),
+    );
+  }, [pluginSkills]);
+
+  /** 搜索中强制展开所有组:命中项藏在收起组里会让搜索看起来失灵 */
+  const searching = query.trim() !== '';
+
+  const togglePlugin = (name: string) =>
+    setExpandedPlugins((m) => ({ ...m, [name]: !m[name] }));
 
   /** 卡片只放关键信息:名称 + 描述(截断);悬停看完整详情 */
   const renderCard = (s: SkillEntry) => (
@@ -206,8 +230,24 @@ function Skills({ onBack }: SkillsProps) {
             )}
             {pluginSkills.length > 0 && (
               <div className="settings-section">
-                <h3>插件下载 ({pluginSkills.length})</h3>
-                <div className="skills-grid">{pluginSkills.map(renderCard)}</div>
+                <h3>插件下载({pluginGroups.length} 个插件)</h3>
+                {pluginGroups.map(([name, group]) => {
+                  const open = searching || !!expandedPlugins[name];
+                  return (
+                    <div key={name} className="plugin-group">
+                      <button
+                        className="plugin-group-header"
+                        onClick={() => togglePlugin(name)}
+                        title={open ? '收起' : '展开'}
+                      >
+                        <span className="plugin-group-caret">{open ? '▾' : '▸'}</span>
+                        <span className="plugin-group-name">{name}</span>
+                        <span className="plugin-group-count">{group.length}</span>
+                      </button>
+                      {open && <div className="skills-grid">{group.map(renderCard)}</div>}
+                    </div>
+                  );
+                })}
               </div>
             )}
             {filtered.length === 0 && (

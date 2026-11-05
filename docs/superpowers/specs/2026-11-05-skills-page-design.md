@@ -68,6 +68,7 @@ pub struct SkillEntry {
     pub source: String,         // "user" | "plugin"
     pub plugin_name: Option<String>, // "superpowers" / "github" 等
     pub plugin_org: Option<String>,  // "claude-plugins-official" / "openai-curated" 等
+    pub plugin_description: Option<String>, // 插件 plugin.json 自述,归一单行
     pub path: String,           // SKILL.md 绝对路径(详情展示)
 }
 ```
@@ -86,14 +87,18 @@ pub fn list_skills(agent: String) -> Result<Vec<SkillEntry>, String>
 - 其余场景(目录缺失、清单文件损坏、单条 SKILL.md 读失败)一律返回可能为空的列表;单条失败 `log::warn` 后跳过,不阻塞整页
 - 同步命令即可(本地 IO 毫秒级,无阻塞风险)
 
-## 页面 UI(720px 窗口)
+## 页面 UI(720px 窗口;以下为 2026-11-05 验收迭代后的定稿形态)
 
 - 顶栏:`← 返回` + 标题「Skills」+ 刷新按钮(强制重新 invoke)
-- **Agent tab**:「Claude Code」「Codex」两枚小 tab,位于顶栏下方;每次切换重新 invoke(不缓存,数据永远新鲜),切换期间显示加载态
-- 搜索框:按名称 / 描述实时过滤(大小写不敏感)
-- 分组:当前 agent 下分「自建 (N)」「插件 (M)」两组;插件条目带插件名徽标,描述超长截断
-- 点击行 → 行内展开详情:完整描述、绝对路径、来源(插件 skill 显示 org/plugin)、调用名与「复制」按钮
-  - 复制的内容为该 skill 的完整命名:自建 = `name`;插件 = `plugin:name`(与 Claude Code 技能清单显示一致)。复制到的是名字本身,斜杠前缀由用户在 CLI 里自行补
+- **Agent tab**:两枚品牌图标 tab(Claude 星芒 / OpenAI 花结,active 态品牌色,悬停有文字提示);每次切换重新 invoke(不缓存),切换期间显示加载态
+- 搜索框:按名称 / 描述(中文与原文皆可命中)/ 插件名实时过滤
+- **网格卡片**:一行 5 个小方块;卡片只放名称(≤2 行截断)+ 描述(≤3 行截断)
+- **悬停详情弹窗**:鼠标悬停卡片弹出(不点击)——名称、完整描述、插件名(org)、路径;fixed 定位避开滚动容器裁剪,`pointer-events:none` 防滑入闪烁
+- 分组:
+  - 「用户目录 (N)」:`~/.<agent>/skills` 下的散装 skill,网格直铺
+  - 「插件下载(K 个插件)」:**按插件折叠分组**——每插件一行(插件名 + 一句话简介 + 数量胶囊,技能多者在前),默认收起,点击展开该组网格;搜索时强制展开
+  - 不做「自建/官方下载」标记:`~/.claude/skills` 下对话创建与按请求下载的 skill 落盘无任何元数据可区分(实测 grill-me 在 installed_plugins/marketplaces/catalog 均无记录)
+- **中文化**:插件简介与 skill 描述经静态词典(`src/i18n/{plugins,skills}-zh.json`,键 `org/plugin`、`plugin:skill`)显示中文;无词条回退英文原文,零运行时成本;插件更新后需重新生成词典
 - 空态:区分「无 skill」与「加载失败」;每个 tab 独立呈现
 
 ## 错误处理汇总
@@ -115,8 +120,9 @@ pub fn list_skills(agent: String) -> Result<Vec<SkillEntry>, String>
 
 ## 验收清单(人工)
 
-1. header 图标进入页面,默认 Claude Code tab,列出本机自建与插件 skill
+1. header 图标进入页面,默认 Claude Code tab,列出本机用户目录与插件 skill
 2. 切到 Codex tab,列出 `~/.codex` 下 skill;`.system` 不出现
-3. 搜索过滤、行内展开、复制调用名可用
-4. 删除/新建一个 skill 目录后点刷新,清单随之变化
-5. 两个 agent 目录均不存在的机器上,页面显示空态而非报错
+3. 插件按归属折叠分组,组头有名称+简介+数量;展开/收起、搜索强制展开可用
+4. 悬停卡片弹出详情(描述中文、插件、路径)
+5. 删除/新建一个 skill 目录(或安装新插件)后点刷新,清单随之变化
+6. 两个 agent 目录均不存在的机器上,页面显示空态而非报错

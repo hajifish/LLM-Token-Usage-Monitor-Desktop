@@ -348,6 +348,8 @@ pub fn on_tray_click(app: &AppHandle) {
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.show();
             let _ = window.set_focus();
+            // 窗口转入可见：同步托盘点击标志（打开主页模式下可见=点击弹菜单）
+            crate::tray::sync_tray_click_flag(app);
         }
         return;
     }

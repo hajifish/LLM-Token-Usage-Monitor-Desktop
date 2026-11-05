@@ -494,7 +494,7 @@ fn user_error_for_secrets(e: &SecretsError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::ProviderConfig;
+    use crate::models::{BackgroundMode, ProviderConfig};
     use base64::{engine::general_purpose::STANDARD, Engine};
 
     /// 生成位于系统临时目录、带唯一后缀的路径，避免污染真实 app data 目录及并发冲突。
@@ -557,6 +557,8 @@ mod tests {
             auto_check_update: true,
             tray_text_enabled: true,
             notifications_enabled: true,
+            tray_click_opens_window: false,
+            background_mode: BackgroundMode::default(),
         }
     }
 

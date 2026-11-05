@@ -79,7 +79,7 @@ function QuotaRow({ q }: { q: QuotaInfo }) {
   );
 }
 
-function ProviderCard({ p }: { p: ProviderStatus }) {
+function ProviderCard({ p, pending }: { p: ProviderStatus; pending: boolean }) {
   if (p.error) {
     return (
       <div className="p-card p-card-error">
@@ -147,9 +147,10 @@ function ProviderCard({ p }: { p: ProviderStatus }) {
             <QuotaRow key={`${q.plan_label ?? ''}-${q.name}-${index}`} q={q} />
           ))}
 
-        {/* Nothing to show (e.g. API key accepted but no data yet) */}
+        {/* Nothing to show (e.g. API key accepted but no data yet)。
+            刷新进行中的启用行（含新增供应商的乐观行）语义是「正在取数」而非「暂无数据」 */}
         {!balance && !(usage && usage.total_tokens > 0) && !quota_infos?.length && (
-          <p className="p-card-empty-hint">暂无数据</p>
+          <p className="p-card-empty-hint">{pending ? '加载中...' : '暂无数据'}</p>
         )}
       </div>
     </div>
@@ -217,7 +218,7 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
       <div className="card-grid">
         {visibleProviders.map((p, i) => (
           // alias 无自定义时回退显示名，同类型无别名双账号会重键；追加下标兜底
-          <ProviderCard key={`${p.name}-${p.alias}-${i}`} p={p} />
+          <ProviderCard key={`${p.name}-${p.alias}-${i}`} p={p} pending={refreshing && p.enabled} />
         ))}
       </div>
     </div>

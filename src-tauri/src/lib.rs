@@ -1,3 +1,4 @@
+mod background;
 mod commands;
 mod config;
 #[cfg(target_os = "macos")]
@@ -14,8 +15,10 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::{Notify, RwLock};
 
+use background::apply_window_effects;
 use commands::{
-    get_config, get_config_health, get_usage, save_config, send_test_notification, trigger_refresh,
+    apply_tray_click_behavior, get_config, get_config_health, get_usage, save_config,
+    send_test_notification, trigger_refresh,
 };
 use models::UsageSummary;
 use scheduler::Scheduler;
@@ -50,8 +53,8 @@ pub fn run() {
         // 应用内自动更新：端点与公钥在 tauri.conf.json 的 plugins.updater 中配置
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            tray::create_tray(app.handle())?;
             let (app_config, config_health) = config::load(app.handle());
+            tray::create_tray(app.handle(), app_config.tray_click_opens_window)?;
             let config_state = Arc::new(RwLock::new(app_config));
             let summary_state = Arc::new(RwLock::new(UsageSummary::default()));
             let health_state = Arc::new(RwLock::new(config_health));
@@ -79,6 +82,8 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
+                // 窗口转入隐藏：打开主页模式下点击托盘应回到「打开主页」分支
+                crate::tray::sync_tray_click_flag(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +93,8 @@ pub fn run() {
             save_config,
             send_test_notification,
             trigger_refresh,
+            apply_tray_click_behavior,
+            apply_window_effects,
             updater::get_update_status,
             updater::check_update,
             updater::download_update,
@@ -106,6 +113,8 @@ pub fn run() {
                             log::error!("Ready 阶段显示主窗口失败: {}", e);
                         }
                         let _ = window.set_focus();
+                        // 窗口转入可见：打开主页模式下点击托盘应弹详情菜单
+                        crate::tray::sync_tray_click_flag(app_handle);
                     } else {
                         log::error!("Ready 阶段未找到 main 窗口（get_webview_window 为 None）");
                     }

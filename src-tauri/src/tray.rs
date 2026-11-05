@@ -5,7 +5,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, Wry,
+    AppHandle, Emitter, Manager, Wry,
 };
 
 /// 托盘中「检查更新」条目的当前句柄。
@@ -383,14 +383,45 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
     let _ = tray.set_icon(Some(img));
 }
 
-pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+/// 同步「左键点击行为」标志到当前窗口可见性（spec：程序化弹菜单在 tauri
+/// 2.11.6 未透出，以标志实时读取等效实现）：
+/// - 菜单模式（opens=false）→ 标志恒 true（点击弹菜单，builder 初值不变）；
+/// - 打开主页模式（opens=true）→ 窗口可见时标志置 true（点击系统自动弹
+///   详情菜单）、隐藏时置 false（点击走「打开主页」分支）。
+///
+/// 窗口显隐的每条路径（关窗隐藏 / 各处 show）之后都必须调用本函数。
+pub fn sync_tray_click_flag(app: &AppHandle) {
+    let opens = app
+        .try_state::<std::sync::Arc<tokio::sync::RwLock<crate::models::AppConfig>>>()
+        .and_then(|cfg| cfg.try_read().ok().map(|g| g.tray_click_opens_window))
+        .unwrap_or(false);
+    let visible = app
+        .get_webview_window("main")
+        .map(|w| w.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+    if let Some(tray) = app.tray_by_id("main_tray") {
+        let _ = tray.set_show_menu_on_left_click(!opens || visible);
+    }
+}
+
+pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<()> {
     // 初始菜单：紧凑风格，scheduler 会动态替换为带供应商详情的完整菜单
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
     let update_item = create_update_item(app, "检查更新")?;
+    let settings_item = MenuItem::with_id(app, "open-settings", "设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&open_item, &separator1, &update_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &open_item,
+            &separator1,
+            &update_item,
+            &settings_item,
+            &quit_item,
+        ],
+    )?;
 
     // 加载全彩图标（使用 @2x 高分辨率版本，macOS 自动缩放）
     let icon_path = app
@@ -418,15 +449,41 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main_tray")
         .icon(tray_icon)
         .icon_as_template(false) // 全彩图标，不启用模板模式
+        .show_menu_on_left_click(!click_opens_window) // 开启「点击打开主页」时左键不弹菜单（右键仍弹）
         .menu(&menu)
         .tooltip("Token Usage")
-        .on_tray_icon_event(|tray, _event| {
+        .on_tray_icon_event(|tray, event| {
             // 每次点击托盘图标时触发后台刷新，数据在下次打开菜单时可见。
             // macOS 系统行为：点击菜单项后菜单必然关闭，因此刷新由托盘图标点击触发，
             // 而非菜单项点击，避免用户期望"菜单保持打开看更新"的落差。
             let app = tray.app_handle();
             if let Some(notify) = app.try_state::<std::sync::Arc<tokio::sync::Notify>>() {
                 notify.notify_one();
+            }
+            // 「点击直接打开主页」模式：左键显示并聚焦主窗口；右键始终弹详情菜单
+            // （show_menu_on_left_click(false) 的标准语义）。配置实时读取：
+            // 设置页切换即时生效，无需重建托盘；state 不可用时仅跳过打开主窗口（菜单弹出与否由启动时的 builder 标志决定）。
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let opens = app
+                    .try_state::<std::sync::Arc<tokio::sync::RwLock<crate::models::AppConfig>>>()
+                    .and_then(|cfg| cfg.try_read().ok().map(|g| g.tray_click_opens_window))
+                    .unwrap_or(false);
+                if opens {
+                    if let Some(window) = app.get_webview_window("main") {
+                        // 窗口已可见时标志已被 sync 置 true：本次点击系统已自动弹
+                        // 详情菜单，无需再处理；不可见时打开主窗口
+                        if !window.is_visible().unwrap_or(false) {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    sync_tray_click_flag(app);
+                }
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -435,6 +492,16 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+                sync_tray_click_flag(app);
+            }
+            "open-settings" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    // 前端 App.tsx 常驻监听 navigate（'settings' → 设置页视图）
+                    let _ = app.emit("navigate", "settings");
+                }
+                sync_tray_click_flag(app);
             }
             "quit" => app.exit(0),
             "check-update" => crate::updater::on_tray_click(app),
@@ -454,7 +521,7 @@ pub fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 #[cfg(test)]
 mod tray_title_tests {
     use super::*;
-    use crate::models::{AppConfig, BalanceData, ProviderConfig};
+    use crate::models::{AppConfig, BackgroundMode, BalanceData, ProviderConfig};
 
     fn balance(v: f64, currency: &str) -> BalanceData {
         BalanceData {
@@ -528,6 +595,8 @@ mod tray_title_tests {
             auto_check_update: true,
             tray_text_enabled: true,
             notifications_enabled: true,
+            tray_click_opens_window: false,
+            background_mode: BackgroundMode::default(),
         }
     }
 

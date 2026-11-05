@@ -49,3 +49,7 @@ src-tauri/gen/
 *.pfx
 *.keystore
 src-tauri/*.key
+
+# verify 技能的运行证据（截图/控制台/快照，按 run 递增，本地留存不入库——
+# 技能 SKILL.md 自身约定 "not git-tracked"）
+.claude/verify-evidence/

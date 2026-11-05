@@ -582,14 +582,14 @@ mod tests {
     }
 
     /// 任何缺 refresh_interval 字段的配置（手改 / 异常截断 / 外部工具产出）都应能加载，
-    /// 并回退到默认 60 秒，而不是导致整体反序列化失败。
+    /// 并回退到默认 180 秒（3 分钟），而不是导致整体反序列化失败。
     #[test]
     fn legacy_config_without_refresh_interval_gets_default() {
         let legacy = r#"{"providers":[{"name":"DeepSeek","api_key":"sk-x","enabled":true}]}"#;
         let cfg: AppConfig = serde_json::from_str(legacy).unwrap();
         assert_eq!(
-            cfg.refresh_interval, 60,
-            "缺省的 refresh_interval 应默认为 60"
+            cfg.refresh_interval, 180,
+            "缺省的 refresh_interval 应默认为 180（3 分钟）"
         );
         assert!(
             cfg.providers[0].show_in_tray,
@@ -724,7 +724,7 @@ mod tests {
 
         let (loaded, health) = load_from_path(&path);
         assert!(loaded.providers.is_empty());
-        assert_eq!(loaded.refresh_interval, 60);
+        assert_eq!(loaded.refresh_interval, 180);
         assert!(health.unreadable, "解密失败必须标记 unreadable");
         assert!(health.backup_path.is_none(), "load 路径不应产生备份");
         // 文件逐字未变

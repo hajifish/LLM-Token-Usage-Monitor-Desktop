@@ -55,7 +55,11 @@ function App() {
               </h1>
               <div className="header-actions">
                 {summary?.last_updated && (
-                  <span className="header-time">{summary.last_updated}</span>
+                  // 主页只显时:分:秒（后端格式 "YYYY-MM-DD HH:MM:SS"，取空格后段；
+                  // 日期冗余——用户关心的是数据新鲜度，不是哪天）
+                  <span className="header-time">
+                    {summary.last_updated.split(' ')[1] ?? summary.last_updated}
+                  </span>
                 )}
                 <button
                   className={`header-refresh-btn${refreshing ? ' is-refreshing' : ''}`}

@@ -4,6 +4,7 @@ import './styles/app.css';
 import UsagePanel from './components/UsagePanel';
 import Settings from './components/Settings';
 import Providers from './components/Providers';
+import Skills from './components/Skills';
 import UpdateNotice from './components/UpdateNotice';
 import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
@@ -11,7 +12,7 @@ import { useUsage } from './hooks/useUsage';
 import { useFrozenBackground } from './hooks/useFrozenBackground';
 
 function App() {
-  const [view, setView] = useState<'usage' | 'settings' | 'providers'>('usage');
+  const [view, setView] = useState<'usage' | 'settings' | 'providers' | 'skills'>('usage');
   const { summary, loading, refreshing, error, refresh, refreshAfterProviderChange } = useUsage();
   const background = useFrozenBackground();
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -83,6 +84,24 @@ function App() {
                 </button>
                 <button
                   className="settings-icon-btn"
+                  onClick={() => setView('skills')}
+                  title="Skill 清单"
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                  </svg>
+                </button>
+                <button
+                  className="settings-icon-btn"
                   onClick={() => setView('providers')}
                   title="供应商配置"
                 >
@@ -132,7 +151,7 @@ function App() {
           </div>
         ) : view === 'settings' ? (
           <Settings onBack={() => setView('usage')} background={background} />
-        ) : (
+        ) : view === 'providers' ? (
           <Providers
             onBack={() => {
               setView('usage');
@@ -141,6 +160,8 @@ function App() {
               refreshAfterProviderChange();
             }}
           />
+        ) : (
+          <Skills onBack={() => setView('usage')} />
         )}
         {appVersion && <div className="version-tag">v{appVersion}</div>}
       </div>

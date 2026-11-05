@@ -21,6 +21,9 @@ pub struct SkillEntry {
     pub plugin_name: Option<String>,
     /// 插件来源组织("claude-plugins-official" / "openai-curated" 等);自建为 None
     pub plugin_org: Option<String>,
+    /// 插件自身描述(来自 .claude-plugin/plugin.json 或 .codex-plugin/plugin.json,
+    /// 已归一为单行);自建为 None
+    pub plugin_description: Option<String>,
     /// SKILL.md 绝对路径(详情展示)
     pub path: String,
 }
@@ -111,16 +114,40 @@ fn parse_frontmatter(content: &str) -> Frontmatter {
     fm
 }
 
+/// 插件上下文:扫描某插件 skills 目录时随行携带的归属信息
+struct PluginCtx<'a> {
+    name: &'a str,
+    org: &'a str,
+    /// 插件自述(单行);plugin.json 缺失或无 description 时为空串
+    description: &'a str,
+}
+
+/// 读插件自述描述:优先 .claude-plugin/plugin.json,回退 .codex-plugin/plugin.json。
+/// 描述归一为单行(换行/连续空白压成单个空格),文件缺失/解析失败/无字段 → None。
+fn read_plugin_description(plugin_root: &Path) -> Option<String> {
+    for meta_dir in [".claude-plugin", ".codex-plugin"] {
+        let Ok(content) = std::fs::read_to_string(plugin_root.join(meta_dir).join("plugin.json"))
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        if let Some(desc) = value.get("description").and_then(|v| v.as_str()) {
+            let single_line: String = desc.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !single_line.is_empty() {
+                return Some(single_line);
+            }
+        }
+    }
+    None
+}
+
 /// 扫描 skills 目录下每个非隐藏子目录的 SKILL.md,构造 SkillEntry。
 /// - 无 frontmatter name → 回退目录名;description 缺失 → 空串
 /// - 目录不存在 / 子目录无 SKILL.md → 跳过(静默)
 /// - SKILL.md 存在但读取失败 → log::warn 后跳过,不阻塞整页
-fn scan_skill_dirs(
-    root: &Path,
-    plugin_name: Option<&str>,
-    plugin_org: Option<&str>,
-    source: &str,
-) -> Vec<SkillEntry> {
+fn scan_skill_dirs(root: &Path, plugin: Option<PluginCtx>, source: &str) -> Vec<SkillEntry> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(root) else {
         return out; // 目录不存在:正常空列表
@@ -147,8 +174,12 @@ fn scan_skill_dirs(
             name: fm.name.unwrap_or_else(|| file_name.to_string()),
             description: fm.description.unwrap_or_default(),
             source: source.to_string(),
-            plugin_name: plugin_name.map(str::to_string),
-            plugin_org: plugin_org.map(str::to_string),
+            plugin_name: plugin.as_ref().map(|p| p.name.to_string()),
+            plugin_org: plugin.as_ref().map(|p| p.org.to_string()),
+            plugin_description: plugin
+                .as_ref()
+                .map(|p| p.description.to_string())
+                .filter(|d| !d.is_empty()),
             path: skill_md.to_string_lossy().into_owned(),
         });
     }
@@ -157,7 +188,7 @@ fn scan_skill_dirs(
 
 /// 用户级 skill:<config_dir>/skills/<名>/SKILL.md(config_dir 如 ~/.claude、~/.codex)
 fn scan_user_skills(config_dir: &Path) -> Vec<SkillEntry> {
-    scan_skill_dirs(&config_dir.join("skills"), None, None, "user")
+    scan_skill_dirs(&config_dir.join("skills"), None, "user")
 }
 
 /// 解析 ~/.claude/plugins/installed_plugins.json,返回去重后的
@@ -216,10 +247,14 @@ fn scan_plugin_cache(config_dir: &Path) -> Vec<SkillEntry> {
                 if version.file_name().to_string_lossy().starts_with('.') {
                     continue;
                 }
+                let description = read_plugin_description(&version.path()).unwrap_or_default();
                 out.extend(scan_skill_dirs(
                     &version.path().join("skills"),
-                    Some(&plugin_name),
-                    Some(&org_name),
+                    Some(PluginCtx {
+                        name: &plugin_name,
+                        org: &org_name,
+                        description: &description,
+                    }),
                     "plugin",
                 ));
             }
@@ -239,7 +274,16 @@ fn scan_plugin_skills(config_dir: &Path, agent: &str) -> Vec<SkillEntry> {
             return dirs
                 .into_iter()
                 .flat_map(|(org, name, path)| {
-                    scan_skill_dirs(&path.join("skills"), Some(&name), Some(&org), "plugin")
+                    let description = read_plugin_description(&path).unwrap_or_default();
+                    scan_skill_dirs(
+                        &path.join("skills"),
+                        Some(PluginCtx {
+                            name: &name,
+                            org: &org,
+                            description: &description,
+                        }),
+                        "plugin",
+                    )
                 })
                 .collect();
         }
@@ -357,6 +401,17 @@ mod skills_tests {
         std::fs::write(dir.join("SKILL.md"), md).unwrap();
     }
 
+    /// 在插件根下写 plugin.json(subdir 为 ".claude-plugin" 或 ".codex-plugin")
+    fn write_plugin_json(plugin_root: &std::path::Path, subdir: &str, description: &str) {
+        let dir = plugin_root.join(subdir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let json = format!(
+            r#"{{"name":"x","description":{}}}"#,
+            serde_json::json!(description)
+        );
+        std::fs::write(dir.join("plugin.json"), json).unwrap();
+    }
+
     #[test]
     fn scan_user_skills_collects_entries_with_fallbacks() {
         let s = ScratchDir::new("user");
@@ -402,6 +457,12 @@ mod skills_tests {
             "alpha",
             "---\nname: alpha\ndescription: 已安装\n---\n",
         );
+        // 插件自述:installPath 根下 .claude-plugin/plugin.json
+        write_plugin_json(
+            &inst_a,
+            ".claude-plugin",
+            "Installed plugin for tests.\nLine2.",
+        );
         // cache 残留(清单未指向):不应出现
         let stale = plugins.join("cache/org-a/stale-plugin/0.1.0");
         write_skill(&stale.join("skills"), "ghost", "---\nname: ghost\n---\n");
@@ -418,6 +479,11 @@ mod skills_tests {
         assert_eq!(entries[0].source, "plugin");
         assert_eq!(entries[0].plugin_name.as_deref(), Some("installed-plugin"));
         assert_eq!(entries[0].plugin_org.as_deref(), Some("org-a"));
+        // 插件描述:换行归一为单行
+        assert_eq!(
+            entries[0].plugin_description.as_deref(),
+            Some("Installed plugin for tests. Line2.")
+        );
     }
 
     #[test]
@@ -448,6 +514,8 @@ mod skills_tests {
             "pdf",
             "---\nname: pdf\ndescription: PDF 处理\n---\n",
         );
+        // Codex 插件自述走 .codex-plugin/plugin.json
+        write_plugin_json(&version_dir, ".codex-plugin", "PDF tools.");
         // 隐藏组织目录(如 .plugin-appserver):跳过
         write_skill(
             &s.path().join("plugins/cache/.hidden/p/1.0/skills"),
@@ -460,6 +528,7 @@ mod skills_tests {
         assert_eq!(entries[0].name, "pdf");
         assert_eq!(entries[0].plugin_name.as_deref(), Some("pdf"));
         assert_eq!(entries[0].plugin_org.as_deref(), Some("openai-curated"));
+        assert_eq!(entries[0].plugin_description.as_deref(), Some("PDF tools."));
     }
 
     // ---- 命令层 ----

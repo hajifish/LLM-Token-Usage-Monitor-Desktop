@@ -214,7 +214,7 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
   }
 
   return (
-    <div className={`usage-panel${refreshing ? ' is-refreshing' : ''}`}>
+    <div className={`usage-panel${refreshing ? ' is-refreshing' : ''}`} data-auto-height-scroller>
       <div className="card-grid">
         {visibleProviders.map((p, i) => (
           // alias 无自定义时回退显示名，同类型无别名双账号会重键；追加下标兜底

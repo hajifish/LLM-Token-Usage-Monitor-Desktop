@@ -409,6 +409,9 @@ pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<(
     let open_item = MenuItem::with_id(app, "open-main-window", "打开主页", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
     let update_item = create_update_item(app, "检查更新")?;
+    // muda 把单个 & 当助记符剥掉（macOS strip_mnemonic / Windows 加速键），
+    // && 才渲染成字面 "Skill & Plugin"
+    let skills_item = MenuItem::with_id(app, "open-skills", "Skill && Plugin", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "open-settings", "设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "⏻\u{FE0E} 退出", true, None::<&str>)?;
 
@@ -418,6 +421,7 @@ pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<(
             &open_item,
             &separator1,
             &update_item,
+            &skills_item,
             &settings_item,
             &quit_item,
         ],
@@ -500,6 +504,15 @@ pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<(
                     let _ = window.set_focus();
                     // 前端 App.tsx 常驻监听 navigate（'settings' → 设置页视图）
                     let _ = app.emit("navigate", "settings");
+                }
+                sync_tray_click_flag(app);
+            }
+            "open-skills" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    // 'skills' → Skills 页视图（同 open-settings 的 navigate 通道）
+                    let _ = app.emit("navigate", "skills");
                 }
                 sync_tray_click_flag(app);
             }

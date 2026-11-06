@@ -185,7 +185,7 @@ function Settings({ onBack, background }: SettingsProps) {
       </div>
       {message && <div className="save-toast">{message}</div>}
 
-      <div className="settings-body">
+      <div className="settings-body" data-auto-height-scroller>
         {/* 状态栏显示 */}
         <div className="settings-section">
           <div className="tray-display-card">

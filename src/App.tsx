@@ -10,9 +10,11 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
 import { useFrozenBackground } from './hooks/useFrozenBackground';
+import { useAutoWindowHeight } from './hooks/useAutoWindowHeight';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings' | 'providers' | 'skills'>('usage');
+  useAutoWindowHeight(view);
   const { summary, loading, refreshing, error, refresh, refreshAfterProviderChange } = useUsage();
   const background = useFrozenBackground();
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -25,6 +27,8 @@ function App() {
     const unlisten = listen<string>('navigate', (event) => {
       if (event.payload === 'settings') {
         setView('settings');
+      } else if (event.payload === 'skills') {
+        setView('skills');
       } else if (event.payload === 'usage') {
         setView('usage');
       }
@@ -84,24 +88,6 @@ function App() {
                 </button>
                 <button
                   className="settings-icon-btn"
-                  onClick={() => setView('skills')}
-                  title="Skill 清单"
-                >
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-                  </svg>
-                </button>
-                <button
-                  className="settings-icon-btn"
                   onClick={() => setView('providers')}
                   title="供应商配置"
                 >
@@ -117,25 +103,6 @@ function App() {
                   >
                     <line x1="12" y1="5" x2="12" y2="19"></line>
                     <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </svg>
-                </button>
-                <button
-                  className="settings-icon-btn"
-                  onClick={() => setView('settings')}
-                  title="设置"
-                >
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="3"></circle>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                   </svg>
                 </button>
               </div>

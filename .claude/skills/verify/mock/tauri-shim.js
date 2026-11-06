@@ -148,6 +148,9 @@
     savedConfigs: [], // every save_config payload, in order — proof of write round trips
     notifications: [], // send_test_notification timestamps
     windowEffects: [], // apply_window_effects modes
+    windowSize: { width: 720, height: 600 }, // 当前窗口逻辑尺寸（inner_size 来源），初值对齐 tauri.conf.json
+    windowSizes: [], // 每次 set_size 的逻辑值记录 — useAutoWindowHeight 断言用
+    scaleFactor: 1, // 逻辑/物理换算用，测试无需真 retina 比例
   };
   window.__VERIFY_MOCK__ = state;
 
@@ -169,9 +172,43 @@
     emit('usage-updated', state.usage);
     return state.usage;
   };
+  // useAutoWindowHeight 经 onResized 监听 tauri://resize；api 层会把 payload
+  // 构造成 PhysicalSize，必须给物理像素尺寸对象
+  state.fireWindowResized = () => emit('tauri://resize', {
+    width: state.windowSize.width * state.scaleFactor,
+    height: state.windowSize.height * state.scaleFactor,
+  });
+  // 托盘菜单切 view 的真实边界：App 监听 navigate 事件（payload 为 view 名）
+  state.fireNavigate = (view) => emit('navigate', view);
 
   const handlers = {
     'plugin:app|version': () => state.version,
+
+    // --- window plugin: useAutoWindowHeight 依赖的三个 API ---
+    'plugin:window|scale_factor': () => state.scaleFactor,
+    'plugin:window|inner_size': () => ({
+      // PhysicalSize 构造只取 width/height 字段
+      width: state.windowSize.width * state.scaleFactor,
+      height: state.windowSize.height * state.scaleFactor,
+    }),
+    // setSize 的 value 在 mock 直通下是 Size 类实例（.size 持 LogicalSize），
+    // 在真序列化下是 { Logical: { width, height } }，两种形都要认。
+    // 记录逻辑值并把当前尺寸推进到新值（真实窗口语义）
+    'plugin:window|set_size': (args) => {
+      const unwrap = (v) => {
+        if (!v) return null;
+        if (v.Logical) return { dims: v.Logical, physical: false };
+        if (v.Physical) return { dims: v.Physical, physical: true };
+        if (v.type === 'Logical' || v.type === 'Physical') return { dims: v, physical: v.type === 'Physical' };
+        return unwrap(v.size);
+      };
+      const u = unwrap(args.value);
+      if (!u) return null;
+      const f = u.physical ? state.scaleFactor : 1;
+      state.windowSize = { width: u.dims.width / f, height: u.dims.height / f };
+      state.windowSizes.push({ width: u.dims.width / f, height: u.dims.height / f });
+      return null;
+    },
 
     'plugin:event|listen': (args) => {
       // @tauri-apps/api v2 listen() resolves the bare callback id as `eventId`

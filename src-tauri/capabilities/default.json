@@ -8,6 +8,7 @@
     "core:event:allow-emit",
     "core:event:allow-listen",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-size",
     "log:default"
   ]
 }

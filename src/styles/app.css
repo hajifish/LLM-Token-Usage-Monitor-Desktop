@@ -152,6 +152,9 @@
 .usage-view {
   display: flex;
   flex-direction: column;
+  /* .app 高度不定（max-height 封顶），flex 子项默认 min-content 托底会
+     顶破封顶被裁掉底部；归零让收缩穿透到内部滚动容器 */
+  min-height: 0;
 }
 
 /* ===== Usage Panel ===== */
@@ -514,6 +517,8 @@
 .settings {
   display: flex;
   flex-direction: column;
+  /* 同 .usage-view：归零 min-height，内容超高时收缩穿透到 .settings-body */
+  min-height: 0;
   background: transparent;
 }
 

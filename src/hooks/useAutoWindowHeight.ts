@@ -14,6 +14,10 @@ const MIN_HEIGHT = 200;
  * 本 hook 是全仓库唯一 setSize 写入点。加载/空态无滚动容器标记，自然跳过，
  * 窗口保持当前高度。自身 setSize 触发的 resized 回声会再测一次，
  * target 不变即终止，不成环。
+ *
+ * 触发即测、不经 rAF 合帧：托盘应用大部分时间窗口隐藏，隐藏态没有帧，
+ * rAF 会让测量挂起直到窗口显示，表现为开窗先闪旧尺寸再跳正。
+ * MutationObserver 本身按变更批交付，无需二次合并。
  */
 export function useAutoWindowHeight(
   view: 'usage' | 'settings' | 'providers' | 'skills',
@@ -27,7 +31,6 @@ export function useAutoWindowHeight(
 
     const win = getCurrentWindow();
     let disposed = false;
-    let rafId = 0;
     let unlisten: (() => void) | undefined;
 
     // 上限只读一次（启动时窗口逻辑高）：若随 effect 重读，会把已收缩的
@@ -36,7 +39,7 @@ export function useAutoWindowHeight(
       .then(([size, factor]) => {
         if (disposed) return;
         maxHeightRef.current = size.toLogical(factor).height;
-        schedule();
+        measure();
       })
       .catch(console.error);
 
@@ -63,26 +66,20 @@ export function useAutoWindowHeight(
       }
     };
 
-    const schedule = () => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(measure);
-    };
-
-    schedule();
-    const observer = new MutationObserver(schedule);
+    measure();
+    const observer = new MutationObserver(measure);
     observer.observe(document.querySelector('.app')!, {
       childList: true,
       subtree: true,
       characterData: true,
     });
-    win.onResized(schedule).then((fn) => {
+    win.onResized(() => measure()).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
     });
 
     return () => {
       disposed = true;
-      cancelAnimationFrame(rafId);
       observer.disconnect();
       unlisten?.();
     };

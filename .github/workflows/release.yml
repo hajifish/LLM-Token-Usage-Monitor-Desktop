@@ -133,30 +133,25 @@ jobs:
             echo "::warning::未找到 ${NOTES_FILE}，回退自动生成说明（应用内更新弹窗将无说明文本）"
           fi
 
+      # 用 gh release edit 而非 softprops action：后者在「更新既有草稿」路径上
+      # body_path 不生效（v0.6.0 实测——发布成功但页面正文为空，latest.json 的
+      # Patch 步骤正常）。gh 语义已手工实证，且少一层第三方 action 行为。
       - name: Fill release notes from file
         if: steps.notes.outputs.source == 'file'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.3.0
-        with:
-          tag_name: ${{ github.ref_name }}
-          # 必须显式给 name：不给的话该 action 会把标题写回成 tag 名
-          name: ${{ steps.ver.outputs.title }}
-          draft: true
-          prerelease: false
-          body_path: ${{ steps.notes.outputs.path }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "${{ steps.ver.outputs.title }}" \
+            --notes-file "${{ steps.notes.outputs.path }}"
 
       - name: Fill generated release notes
         if: steps.notes.outputs.source == 'generated'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.3.0
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ steps.ver.outputs.title }}
-          draft: true
-          prerelease: false
-          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "${{ steps.ver.outputs.title }}" --generate-notes
 
       # latest.json 由构建 job 在说明就位前生成，notes 字段为空；这里把同一份
       # 说明补写进 latest.json 并覆盖上传——应用内更新弹窗读取的是该文件的

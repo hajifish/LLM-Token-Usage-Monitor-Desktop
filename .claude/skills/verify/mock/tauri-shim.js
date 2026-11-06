@@ -180,6 +180,12 @@
   });
   // 托盘菜单切 view 的真实边界：App 监听 navigate 事件（payload 为 view 名）
   state.fireNavigate = (view) => emit('navigate', view);
+  // 更新横幅/弹窗驱动口：合并 patch 进 update 状态并推送 update-status 事件
+  state.fireUpdateStatus = (patch) => {
+    state.update = { ...state.update, ...patch };
+    emit('update-status', state.update);
+    return state.update;
+  };
 
   const handlers = {
     'plugin:app|version': () => state.version,

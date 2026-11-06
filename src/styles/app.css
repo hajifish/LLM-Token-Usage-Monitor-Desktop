@@ -738,12 +738,6 @@ input:focus, select:focus {
   color: var(--system-blue);
 }
 
-.update-banner-notes {
-  font-size: 12px;
-  color: var(--system-secondary-label);
-  line-height: 1.5;
-}
-
 .update-banner-error,
 .update-error {
   font-size: 12px;
@@ -822,6 +816,233 @@ input:focus, select:focus {
   font-size: 11px;
   color: var(--system-tertiary-label);
   font-variant-numeric: tabular-nums;
+}
+
+/* ===== 更新内容展示（横幅保持单行，长文进弹窗/展开面板） ===== */
+
+.update-banner-meta {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--system-tertiary-label);
+  margin-left: 8px;
+}
+
+/* 蓝底横幅里的 ghost 按钮提亮一档，保证可点 affordance */
+.update-banner .update-btn.ghost {
+  color: var(--system-secondary-label);
+}
+
+.update-banner .update-btn.ghost:hover {
+  color: var(--system-label);
+}
+
+/* --- 发版说明排版（弹窗与展开面板共用） --- */
+
+.rn-section + .rn-section {
+  margin-top: 18px;
+}
+
+.rn-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--system-secondary-label);
+  letter-spacing: 1px;
+  margin-bottom: 9px;
+}
+
+.rn-section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--system-separator);
+}
+
+.rn-items {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.rn-item {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.62;
+}
+
+.rn-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.rn-item-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--system-blue);
+  opacity: 0.75;
+  flex-shrink: 0;
+  margin-top: 8px;
+}
+
+.rn-section[data-kind='fix'] .rn-item-dot {
+  background: var(--system-green);
+}
+
+.rn-section[data-kind='improve'] .rn-item-dot {
+  background: var(--system-orange);
+}
+
+.rn-item-name {
+  color: var(--system-label);
+  font-weight: 600;
+}
+
+.rn-item-detail {
+  color: var(--system-secondary-label);
+}
+
+.rn-footnote {
+  margin-top: 16px;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: var(--system-tertiary-label);
+  line-height: 1.6;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid var(--system-quaternary-label);
+  border-radius: 0 8px 8px 0;
+}
+
+.rn-fallback {
+  font-size: 12.5px;
+  color: var(--system-secondary-label);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* --- 更新内容弹窗 --- */
+
+.update-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  animation: update-dialog-fade 0.18s ease;
+}
+
+.update-dialog {
+  width: min(480px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: rgba(40, 40, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 24px 68px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  outline: none;
+  animation: update-dialog-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+
+.update-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--system-separator);
+}
+
+.update-dialog-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--system-blue);
+}
+
+.update-dialog-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--system-label);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-dialog-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--system-tertiary-label);
+  margin-top: 4px;
+}
+
+.update-dialog-close {
+  border: none;
+  background: transparent;
+  color: var(--system-tertiary-label);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.update-dialog-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--system-label);
+}
+
+.update-dialog-body {
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* ready 相位安装说明的固定槽位：位于正文滚动区与 footer 之间，不随正文滚动 */
+.update-dialog-note-slot {
+  padding: 0 20px 12px;
+}
+
+.update-dialog-note {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  color: var(--system-secondary-label);
+  line-height: 1.6;
+}
+
+.update-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--system-separator);
+}
+
+@keyframes update-dialog-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes update-dialog-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
 }
 
 /* Settings: 关于与更新卡片 */

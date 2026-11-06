@@ -209,7 +209,9 @@ fn user_error_msg(e: &tauri_plugin_updater::Error) -> String {
 }
 
 /// 执行一次检查并更新状态；返回检查后的状态快照。
-async fn run_check(app: &AppHandle) -> UpdateStatus {
+/// `manual` = 用户主动触发（托盘菜单）。托盘路径没有界面承载结果，失败、
+/// 已是最新、发现新版都发系统通知；自动检查每小时静默跑，不打扰。
+async fn run_check(app: &AppHandle, manual: bool) -> UpdateStatus {
     mutate_status(app, |s| {
         s.phase = UpdatePhase::Checking;
         s.message = Some("正在检查更新…".to_string());
@@ -231,11 +233,12 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
                         .to_string()
                 })
             });
-            if pending_version(app).as_deref() == Some(version.as_str()) {
+            let already_downloaded = pending_version(app).as_deref() == Some(version.as_str());
+            if already_downloaded {
                 let len = pending_len(app);
                 mutate_status(app, |s| {
                     s.phase = UpdatePhase::Ready;
-                    s.version = Some(version);
+                    s.version = Some(version.clone());
                     s.notes = notes;
                     s.date = date;
                     s.downloaded = len;
@@ -247,7 +250,7 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
                 clear_pending(app);
                 mutate_status(app, |s| {
                     s.phase = UpdatePhase::Available;
-                    s.version = Some(version);
+                    s.version = Some(version.clone());
                     s.notes = notes;
                     s.date = date;
                     s.downloaded = 0;
@@ -255,6 +258,23 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
                     s.message = None;
                     s.last_checked = Some(now);
                 });
+            }
+            // 手动检查发现新版也须可见：托盘文案在菜单收起时不可见，
+            // 不发通知用户还是「点了没反应」。菜单里的新版本条目即开主窗口
+            if manual {
+                let (title, body) = if already_downloaded {
+                    (
+                        format!("📦 v{version} 已就绪"),
+                        "更新包已下载完成，点击托盘更新条目即可打开主页安装。".to_string(),
+                    )
+                } else {
+                    let current = app.package_info().version.to_string();
+                    (
+                        format!("🆕 发现新版本 v{version}"),
+                        format!("当前 v{current}，打开托盘菜单查看更新。"),
+                    )
+                };
+                crate::notification::send_update_check_notice(app, &title, &body);
             }
         }
         Ok(None) => {
@@ -269,10 +289,25 @@ async fn run_check(app: &AppHandle) -> UpdateStatus {
                 s.message = Some("已是最新版本".to_string());
                 s.last_checked = Some(now);
             });
+            if manual {
+                let current = app.package_info().version.clone();
+                crate::notification::send_update_check_notice(
+                    app,
+                    "✅ 已是最新版本",
+                    &format!("当前 v{current}，暂无可用更新"),
+                );
+            }
         }
         Err(e) => {
             log::warn!("更新: 检查失败: {}", e);
             let message = user_error_msg(&e);
+            if manual {
+                crate::notification::send_update_check_notice(
+                    app,
+                    "⚠️ 更新检查失败",
+                    &message,
+                );
+            }
             mutate_status(app, |s| {
                 s.phase = UpdatePhase::Failed;
                 s.message = Some(message);
@@ -304,7 +339,7 @@ pub fn spawn_auto_check(app: AppHandle, config: Arc<AsyncRwLock<AppConfig>>) {
             let enabled = config.read().await.auto_check_update;
             // 开发构建跳过自动检查：latest.json 面向正式构建，调试版本反复弹提示没有意义
             if enabled && !cfg!(debug_assertions) {
-                let _ = run_check(&app).await;
+                let _ = run_check(&app, false).await;
             }
             tokio::time::sleep(CHECK_INTERVAL).await;
         }
@@ -317,7 +352,7 @@ pub fn spawn_check(app: AppHandle) {
         if snapshot(&app).phase.is_busy() {
             return;
         }
-        let _ = run_check(&app).await;
+        let _ = run_check(&app, true).await;
     });
 }
 
@@ -367,7 +402,7 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateStatus, String> {
     if current.phase.is_busy() {
         return Ok(current);
     }
-    Ok(run_check(&app).await)
+    Ok(run_check(&app, false).await)
 }
 
 #[tauri::command]

@@ -900,6 +900,15 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             critical_ok &= menu.append(&update_item).is_ok();
         }
 
+        // 5.6) Skill & Plugin → Skills 页（与 open-settings 同走 navigate 通道）；
+        // && 是 muda 助记符转义，实际渲染为 "Skill & Plugin"（tray.rs 同注）
+        let Ok(skills_item) =
+            MenuItem::with_id(app_handle, "open-skills", "Skill && Plugin", true, None::<&str>)
+        else {
+            return;
+        };
+        critical_ok &= menu.append(&skills_item).is_ok();
+
         // 6) 分隔线 → 设置 → 退出（设置直达设置页；退出仍是末项，Accessory 模式唯一出口）
         let Ok(separator2) = PredefinedMenuItem::separator(app_handle) else {
             return;

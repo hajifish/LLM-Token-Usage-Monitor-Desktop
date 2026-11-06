@@ -148,6 +148,9 @@
     savedConfigs: [], // every save_config payload, in order — proof of write round trips
     notifications: [], // send_test_notification timestamps
     windowEffects: [], // apply_window_effects modes
+    windowSize: { width: 720, height: 600 }, // 当前窗口逻辑尺寸（inner_size 来源），初值对齐 tauri.conf.json
+    windowSizes: [], // 每次 set_size 的逻辑值记录 — useAutoWindowHeight 断言用
+    scaleFactor: 1, // 逻辑/物理换算用，测试无需真 retina 比例
   };
   window.__VERIFY_MOCK__ = state;
 
@@ -169,9 +172,30 @@
     emit('usage-updated', state.usage);
     return state.usage;
   };
+  // useAutoWindowHeight 经 onResized 监听 tauri://resize；测试用它模拟窗口几何事件
+  state.fireWindowResized = () => emit('tauri://resize', null);
 
   const handlers = {
     'plugin:app|version': () => state.version,
+
+    // --- window plugin: useAutoWindowHeight 依赖的三个 API ---
+    'plugin:window|scale_factor': () => state.scaleFactor,
+    'plugin:window|inner_size': () => ({
+      // PhysicalSize 构造只取 width/height 字段
+      width: state.windowSize.width * state.scaleFactor,
+      height: state.windowSize.height * state.scaleFactor,
+    }),
+    // setSize(new LogicalSize(w, h)) 序列化为 { Logical: { width, height } }；
+    // 记录逻辑值并把当前尺寸推进到新值（真实窗口语义）
+    'plugin:window|set_size': (args) => {
+      const value = args.value ?? {};
+      const logical = value.Logical ?? value.Physical;
+      if (!logical) return null;
+      const f = value.Physical ? state.scaleFactor : 1;
+      state.windowSize = { width: logical.width / f, height: logical.height / f };
+      state.windowSizes.push({ width: logical.width / f, height: logical.height / f });
+      return null;
+    },
 
     'plugin:event|listen': (args) => {
       // @tauri-apps/api v2 listen() resolves the bare callback id as `eventId`

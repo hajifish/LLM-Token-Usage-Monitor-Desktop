@@ -201,6 +201,26 @@ pub(crate) fn send_test_notification(app: &AppHandle) {
     }
 }
 
+/// 发送更新检查结果通知（托盘「检查更新」入口的反馈通道）。
+///
+/// 托盘路径没有界面承载检查结果：失败与「已是最新」此前完全静默，用户点击后
+/// 毫无反馈（2026-11-06 实测踩中）。仅用户手动触发的检查走这里；自动检查
+/// 每小时一次，失败不打扰。
+pub(crate) fn send_update_check_notice(app: &AppHandle, title: &str, body: &str) {
+    log::info!("发送更新检查通知：{}", title);
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .sound(DEFAULT_SOUND)
+        .show()
+    {
+        // 死代码：桌面端插件无条件返回 Ok；保留分支仅防御上游后端行为变化
+        log::warn!("更新检查通知发送失败: {}", e);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

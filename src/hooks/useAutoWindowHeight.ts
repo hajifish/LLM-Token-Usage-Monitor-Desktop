@@ -33,16 +33,6 @@ export function useAutoWindowHeight(
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
-    // 上限只读一次（启动时窗口逻辑高）：若随 effect 重读，会把已收缩的
-    // 当前高度误当上限，窗口再也无法长回
-    Promise.all([win.innerSize(), win.scaleFactor()])
-      .then(([size, factor]) => {
-        if (disposed) return;
-        maxHeightRef.current = size.toLogical(factor).height;
-        measure();
-      })
-      .catch(console.error);
-
     const measure = () => {
       const scroller = document.querySelector<HTMLElement>(
         '[data-auto-height-scroller]',
@@ -66,7 +56,21 @@ export function useAutoWindowHeight(
       }
     };
 
-    measure();
+    // 上限只读一次（启动时窗口逻辑高）：effect 随 view 切换重跑，若每次
+    // 重读 innerSize，会把已收缩的当前高度误当上限，窗口再也无法长回。
+    // ref 存值不等于只读一次——读取动作本身也必须只发生一次。
+    if (maxHeightRef.current === null) {
+      Promise.all([win.innerSize(), win.scaleFactor()])
+        .then(([size, factor]) => {
+          if (disposed) return;
+          maxHeightRef.current = size.toLogical(factor).height;
+          measure();
+        })
+        .catch(console.error);
+    } else {
+      measure();
+    }
+
     const observer = new MutationObserver(measure);
     observer.observe(document.querySelector('.app')!, {
       childList: true,

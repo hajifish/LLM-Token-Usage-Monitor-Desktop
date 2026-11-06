@@ -226,7 +226,7 @@ function Skills({ onBack }: SkillsProps) {
         </button>
       </div>
 
-      <div className="settings-body">
+      <div className="settings-body" data-auto-height-scroller>
         <input
           className="skills-search"
           type="text"

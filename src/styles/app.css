@@ -32,7 +32,8 @@
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
   background: transparent;
   position: relative;
   z-index: 1;
@@ -151,13 +152,14 @@
 .usage-view {
   display: flex;
   flex-direction: column;
-  height: 100vh;
 }
 
 /* ===== Usage Panel ===== */
 .usage-panel {
   padding: 16px;
-  flex: 1;
+  /* basis 0 在 max-height 自适应容器里会把面板压塌成 0 高，
+     必须以内容为基准参与伸缩，窗口高度才量得准 */
+  flex: 1 1 auto;
   overflow-y: auto;
   background: transparent;
 }
@@ -167,7 +169,10 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1;
+  flex: 1 1 auto;
+  /* 无 scroller 标记、不参与高度自适应，撑满视口保持居中观感
+     （45 = 标题栏 padding 8 + 按钮 28 + padding 8 + 分隔线 1） */
+  min-height: calc(100vh - 45px);
   color: var(--system-tertiary-label);
 }
 
@@ -509,13 +514,13 @@
 .settings {
   display: flex;
   flex-direction: column;
-  height: 100vh;
   background: transparent;
 }
 
 .settings.loading {
   display: flex; align-items: center; justify-content: center;
-  flex: 1; color: var(--system-secondary-label);
+  /* 整视图替换元素，无标题栏兄弟，撑满视口保持居中观感 */
+  flex: 1; height: 100vh; color: var(--system-secondary-label);
 }
 
 /* Fixed header bar */
@@ -568,7 +573,8 @@
 
 /* Scrollable body */
 .settings-body {
-  flex: 1;
+  /* 同 .usage-panel：basis 0 会在 max-height 自适应容器里塌缩 */
+  flex: 1 1 auto;
   overflow-y: auto;
   padding: 12px 16px 24px;
 }
@@ -902,8 +908,10 @@ input:focus, select:focus {
 .background-frozen {
   position: fixed;
   inset: 0;
-  background-position: center;
-  background-size: 100% 100%;
+  /* 图是当前窗 2x 截图（1440×1200）：cover + 顶部锚定，窗口收缩后
+     不竖向压扁构图；600 高时渲染不变 */
+  background-position: center top;
+  background-size: cover;
   background-repeat: no-repeat;
   border-radius: 10px;
   pointer-events: none;

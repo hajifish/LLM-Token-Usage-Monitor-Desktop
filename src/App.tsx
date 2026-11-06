@@ -10,9 +10,11 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { listen } from '@tauri-apps/api/event';
 import { useUsage } from './hooks/useUsage';
 import { useFrozenBackground } from './hooks/useFrozenBackground';
+import { useAutoWindowHeight } from './hooks/useAutoWindowHeight';
 
 function App() {
   const [view, setView] = useState<'usage' | 'settings' | 'providers' | 'skills'>('usage');
+  useAutoWindowHeight(view);
   const { summary, loading, refreshing, error, refresh, refreshAfterProviderChange } = useUsage();
   const background = useFrozenBackground();
   const [appVersion, setAppVersion] = useState<string | null>(null);

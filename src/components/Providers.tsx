@@ -210,7 +210,7 @@ function Providers({ onBack }: ProvidersProps) {
       </div>
       {message && <div className="save-toast">{message}</div>}
 
-      <div className="settings-body">
+      <div className="settings-body" data-auto-height-scroller>
         {/* 配置健康提示 */}
         {showUnreadable && (
           <div style={BANNER_TONE.danger} role="alert">

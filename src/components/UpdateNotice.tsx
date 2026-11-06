@@ -52,9 +52,10 @@ function ReleaseNotesView({ parsed }: { parsed: ReleaseNotes }) {
   }
   return (
     <div className="rn-body">
-      {parsed.sections.map((section) => (
+      {parsed.preamble !== null && <p className="rn-fallback">{parsed.preamble}</p>}
+      {parsed.sections.map((section, si) => (
         <section
-          key={section.title}
+          key={`${si}-${section.title}`}
           className="rn-section"
           data-kind={sectionKind(section.title)}
         >

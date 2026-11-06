@@ -265,7 +265,7 @@ async fn run_check(app: &AppHandle, manual: bool) -> UpdateStatus {
                 let (title, body) = if already_downloaded {
                     (
                         format!("📦 v{version} 已就绪"),
-                        "更新包已下载完成，打开托盘菜单即可安装。".to_string(),
+                        "更新包已下载完成，点击托盘更新条目即可打开主页安装。".to_string(),
                     )
                 } else {
                     let current = app.package_info().version.to_string();

@@ -738,12 +738,6 @@ input:focus, select:focus {
   color: var(--system-blue);
 }
 
-.update-banner-notes {
-  font-size: 12px;
-  color: var(--system-secondary-label);
-  line-height: 1.5;
-}
-
 .update-banner-error,
 .update-error {
   font-size: 12px;

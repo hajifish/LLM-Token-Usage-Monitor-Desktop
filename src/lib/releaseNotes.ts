@@ -21,6 +21,8 @@ export interface ReleaseNoteSection {
 }
 
 export interface ReleaseNotes {
+  /** 首个分节之前的散行（合并为一段）；无则 null */
+  preamble: string | null;
   sections: ReleaseNoteSection[];
   /** 「> 引用」脚注（多条合并为一段）；无则 null */
   footnote: string | null;
@@ -44,6 +46,7 @@ function parseItem(line: string): ReleaseNoteItem {
 export function parseReleaseNotes(notes: string): ReleaseNotes {
   const sections: ReleaseNoteSection[] = [];
   const footnotes: string[] = [];
+  const preambles: string[] = [];
 
   for (const rawLine of notes.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -61,12 +64,21 @@ export function parseReleaseNotes(notes: string): ReleaseNotes {
     const bullet = line.match(/^[-*+]\s+(.+)$/);
     if (bullet && sections.length > 0) {
       sections[sections.length - 1].items.push(parseItem(bullet[1]));
+      continue;
+    }
+    // 散行不丢弃：分节前入 preamble，分节内并入当前分节（保序、无名条目）
+    const text = stripLinks(line).trim();
+    if (sections.length > 0) {
+      sections[sections.length - 1].items.push({ name: null, detail: text });
+    } else {
+      preambles.push(text);
     }
   }
 
   // 过滤后的分节才是有效解析结果；「有标题但零条目」等形态按未解析处理，走原文兜底
   const parsed = sections.filter((s) => s.items.length > 0);
   return {
+    preamble: preambles.length > 0 ? preambles.join(' ') : null,
     sections: parsed,
     footnote: footnotes.length > 0 ? stripLinks(footnotes.join(' ')).trim() : null,
     fallbackText: parsed.length === 0 ? notes.trim() || null : null,

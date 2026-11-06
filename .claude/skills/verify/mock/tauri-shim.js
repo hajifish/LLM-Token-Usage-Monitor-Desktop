@@ -172,8 +172,14 @@
     emit('usage-updated', state.usage);
     return state.usage;
   };
-  // useAutoWindowHeight 经 onResized 监听 tauri://resize；测试用它模拟窗口几何事件
-  state.fireWindowResized = () => emit('tauri://resize', null);
+  // useAutoWindowHeight 经 onResized 监听 tauri://resize；api 层会把 payload
+  // 构造成 PhysicalSize，必须给物理像素尺寸对象
+  state.fireWindowResized = () => emit('tauri://resize', {
+    width: state.windowSize.width * state.scaleFactor,
+    height: state.windowSize.height * state.scaleFactor,
+  });
+  // 托盘菜单切 view 的真实边界：App 监听 navigate 事件（payload 为 view 名）
+  state.fireNavigate = (view) => emit('navigate', view);
 
   const handlers = {
     'plugin:app|version': () => state.version,
@@ -185,15 +191,22 @@
       width: state.windowSize.width * state.scaleFactor,
       height: state.windowSize.height * state.scaleFactor,
     }),
-    // setSize(new LogicalSize(w, h)) 序列化为 { Logical: { width, height } }；
+    // setSize 的 value 在 mock 直通下是 Size 类实例（.size 持 LogicalSize），
+    // 在真序列化下是 { Logical: { width, height } }，两种形都要认。
     // 记录逻辑值并把当前尺寸推进到新值（真实窗口语义）
     'plugin:window|set_size': (args) => {
-      const value = args.value ?? {};
-      const logical = value.Logical ?? value.Physical;
-      if (!logical) return null;
-      const f = value.Physical ? state.scaleFactor : 1;
-      state.windowSize = { width: logical.width / f, height: logical.height / f };
-      state.windowSizes.push({ width: logical.width / f, height: logical.height / f });
+      const unwrap = (v) => {
+        if (!v) return null;
+        if (v.Logical) return { dims: v.Logical, physical: false };
+        if (v.Physical) return { dims: v.Physical, physical: true };
+        if (v.type === 'Logical' || v.type === 'Physical') return { dims: v, physical: v.type === 'Physical' };
+        return unwrap(v.size);
+      };
+      const u = unwrap(args.value);
+      if (!u) return null;
+      const f = u.physical ? state.scaleFactor : 1;
+      state.windowSize = { width: u.dims.width / f, height: u.dims.height / f };
+      state.windowSizes.push({ width: u.dims.width / f, height: u.dims.height / f });
       return null;
     },
 

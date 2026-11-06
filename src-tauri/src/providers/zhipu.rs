@@ -88,7 +88,20 @@ impl ZhipuProvider {
 /// 处理会整晚渲染成「0% 耗尽」并发假告警（2026-11-05 事故：上游返回缺字段的
 /// 200 响应，实际额度完好）。不完整响应在此拦成错误，走既有「获取失败」路径。
 fn validate_quota_response(resp: &ZhipuQuotaResponse) -> Result<(), ProviderError> {
-    let _ = resp;
+    let data = resp
+        .data
+        .as_ref()
+        .ok_or_else(|| ProviderError("智谱响应缺少 data（配额数据不完整）".to_string()))?;
+    let limits = data
+        .limits
+        .as_ref()
+        .filter(|l| !l.is_empty())
+        .ok_or_else(|| ProviderError("智谱响应 limits 为空（配额数据不完整）".to_string()))?;
+    if limits.iter().any(|l| l.percentage.is_none()) {
+        return Err(ProviderError(
+            "智谱响应存在缺少 percentage 的窗口（配额数据不完整）".to_string(),
+        ));
+    }
     Ok(())
 }
 
@@ -234,10 +247,8 @@ mod tests {
     #[test]
     fn validate_accepts_observed_response_shapes() {
         // 两种套餐档位的真实形态都必须放行（pro 的无 nextResetTime 窗口属正常形态）
-        validate_quota_response(&parsed(&observed_max_body()))
-            .expect("max 档实测响应应通过校验");
-        validate_quota_response(&parsed(&observed_pro_body()))
-            .expect("pro 档实测响应应通过校验");
+        validate_quota_response(&parsed(&observed_max_body())).expect("max 档实测响应应通过校验");
+        validate_quota_response(&parsed(&observed_pro_body())).expect("pro 档实测响应应通过校验");
     }
 
     #[test]
@@ -249,8 +260,8 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("percentage");
-        let err = validate_quota_response(&parsed(&body))
-            .expect_err("缺 percentage 的窗口必须被拒绝");
+        let err =
+            validate_quota_response(&parsed(&body)).expect_err("缺 percentage 的窗口必须被拒绝");
         assert!(
             err.0.contains("percentage"),
             "错误文案应点名缺失字段便于排查: {}",
@@ -262,19 +273,14 @@ mod tests {
     fn validate_rejects_empty_limits() {
         let mut body = observed_pro_body();
         body["data"]["limits"] = json!([]);
-        validate_quota_response(&parsed(&body))
-            .expect_err("空 limits 无从计算剩余，必须被拒绝");
+        validate_quota_response(&parsed(&body)).expect_err("空 limits 无从计算剩余，必须被拒绝");
     }
 
     #[test]
     fn validate_rejects_absent_limits() {
         let mut body = observed_pro_body();
-        body["data"]
-            .as_object_mut()
-            .unwrap()
-            .remove("limits");
-        validate_quota_response(&parsed(&body))
-            .expect_err("缺 limits 字段必须被拒绝");
+        body["data"].as_object_mut().unwrap().remove("limits");
+        validate_quota_response(&parsed(&body)).expect_err("缺 limits 字段必须被拒绝");
     }
 
     #[test]

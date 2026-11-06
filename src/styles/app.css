@@ -524,8 +524,10 @@
 
 .settings.loading {
   display: flex; align-items: center; justify-content: center;
-  /* 整视图替换元素，无标题栏兄弟，撑满视口保持居中观感 */
-  flex: 1; height: 100vh; color: var(--system-secondary-label);
+  /* 整视图替换元素，无标题栏兄弟，撑满视口保持居中观感。
+     basis 必须 auto：0% 在 auto 高 .app 里把元素压到 min-content（18.5px），
+     height: 100vh 会被 flex-basis 架空；与 .usage-panel 空态同款修法 */
+  flex: 1 1 auto; min-height: 100vh; color: var(--system-secondary-label);
 }
 
 /* Fixed header bar */

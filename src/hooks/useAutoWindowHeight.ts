@@ -71,8 +71,10 @@ export function useAutoWindowHeight(
       measure();
     }
 
+    // 观察 body 而非 .app：ErrorBoundary「重试」会重建 .app 节点，
+    // 盯旧节点会让自适应静默失灵；measure 内部对 .app 缺失已有空判
     const observer = new MutationObserver(measure);
-    observer.observe(document.querySelector('.app')!, {
+    observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,

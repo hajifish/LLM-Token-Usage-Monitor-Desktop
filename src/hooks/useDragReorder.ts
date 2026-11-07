@@ -98,38 +98,45 @@ export function useDragReorder<T>(opts: {
    *  （真机反馈「拖到中间弹到最边上」的根因）。换回需完整退过原槽中线，
    *  死区整槽宽；斜穿目标槽角落时中线未越过、不触发，不会路过就被抢走。
    *  禁用任何容差放大。槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/
-   *  跟随 transform 变化）。返回换位后的位置 */
-  const evaluateSwap = useCallback((g: Gesture<T>, clientX: number, clientY: number): number => {
-    const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
-    const cur = g.slots[curPos];
-    const cx = g.originRect.left + g.originRect.width / 2 + (clientX - g.startX);
-    const cy = g.originRect.top + g.originRect.height / 2 + (clientY - g.startY);
-    const curCx = cur.rect.left + cur.rect.width / 2;
-    const curCy = cur.rect.top + cur.rect.height / 2;
-    const to = g.slots.findIndex((s, idx) => {
-      if (idx === curPos) return false;
-      const r = s.rect;
-      if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return false;
-      const midX = r.left + r.width / 2;
-      const midY = r.top + r.height / 2;
-      // 1px 容差：终点恰落在目标中心时浮点舍入会让等值比较时灵时不灵
-      // （真机快甩以格心为终点，Lane A 复现过同点成败不一）
-      const EPS = 1;
-      if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
-        return midX > curCx ? cx >= midX - EPS : cx <= midX + EPS;
-      }
-      return midY > curCy ? cy >= midY - EPS : cy <= midY + EPS;
-    });
-    if (to < 0 || to === curPos) return curPos;
-    // FLIP 基线：重排前的视口坐标
-    prevRects.current.clear();
-    cards.current.forEach((el, key) => prevRects.current.set(key, el.getBoundingClientRect()));
-    const perm = g.perm.slice();
-    perm.splice(to, 0, perm.splice(curPos, 1)[0]);
-    g.perm = perm;
-    setLive({ items: perm.map((i) => g.snapshot[i]), keys: perm.map((i) => g.keys[i]) });
-    return to;
-  }, []);
+   *  跟随 transform 变化）。
+   *  final = 松手终判：只看容纳、不要求中线 —— 回滞是拖动中防抖用的，
+   *  释放时以卡片视觉所在格为准，落点没过中线也落进该格（否则卡片回弹
+   *  到旧槽位，用户看到「松手后又变了一次位置」）。返回换位后的位置 */
+  const evaluateSwap = useCallback(
+    (g: Gesture<T>, clientX: number, clientY: number, final: boolean): number => {
+      const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
+      const cur = g.slots[curPos];
+      const cx = g.originRect.left + g.originRect.width / 2 + (clientX - g.startX);
+      const cy = g.originRect.top + g.originRect.height / 2 + (clientY - g.startY);
+      const curCx = cur.rect.left + cur.rect.width / 2;
+      const curCy = cur.rect.top + cur.rect.height / 2;
+      const to = g.slots.findIndex((s, idx) => {
+        if (idx === curPos) return false;
+        const r = s.rect;
+        if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return false;
+        if (final) return true;
+        const midX = r.left + r.width / 2;
+        const midY = r.top + r.height / 2;
+        // 1px 容差：终点恰落在目标中心时浮点舍入会让等值比较时灵时不灵
+        // （真机快甩以格心为终点，Lane A 复现过同点成败不一）
+        const EPS = 1;
+        if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
+          return midX > curCx ? cx >= midX - EPS : cx <= midX + EPS;
+        }
+        return midY > curCy ? cy >= midY - EPS : cy <= midY + EPS;
+      });
+      if (to < 0 || to === curPos) return curPos;
+      // FLIP 基线：重排前的视口坐标
+      prevRects.current.clear();
+      cards.current.forEach((el, key) => prevRects.current.set(key, el.getBoundingClientRect()));
+      const perm = g.perm.slice();
+      perm.splice(to, 0, perm.splice(curPos, 1)[0]);
+      g.perm = perm;
+      setLive({ items: perm.map((i) => g.snapshot[i]), keys: perm.map((i) => g.keys[i]) });
+      return to;
+    },
+    [],
+  );
 
   const endGesture = useCallback((ev: PointerEvent) => {
     const g = gesture.current;
@@ -141,8 +148,9 @@ export function useDragReorder<T>(opts: {
     window.getSelection()?.removeAllRanges();
     if (!g.active) return;
     // 松手前用最终坐标再判定一次换位：无停顿快甩时浏览器会合并
-    // pointermove，最后一跃可能不产生 move 事件（Lane A 复现过）
-    evaluateSwap(g, ev.clientX, ev.clientY);
+    // pointermove，最后一跃可能不产生 move 事件（Lane A 复现过）；
+    // 终判只看容纳 —— 落点在哪个格就落哪个格，不因中线未过而回弹
+    evaluateSwap(g, ev.clientX, ev.clientY, true);
     setDraggedKey(null);
     setOffset({ x: 0, y: 0 });
     setLive(null);
@@ -181,7 +189,7 @@ export function useDragReorder<T>(opts: {
       setDraggedKey(g.key);
     }
 
-    const pos = evaluateSwap(g, ev.clientX, ev.clientY);
+    const pos = evaluateSwap(g, ev.clientX, ev.clientY, false);
 
     // 渲染位移：扣掉最终槽位相对起点槽位的差值，换位后卡片钉在指针底下。
     // 必须在换位判定之后按新槽位计算 —— 否则换位当帧用的是旧槽位偏移，

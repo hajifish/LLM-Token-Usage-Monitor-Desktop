@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { AppConfig, ProviderStatus, UsageSummary } from '../types';
 import { providerLabel } from '../providerMeta';
+import { reorderPicked, statusIdentity } from '../lib/providerOrder';
 
 export type { BalanceData, QuotaInfo, UsageData, ProviderStatus, UsageSummary } from '../types';
 
@@ -129,5 +130,29 @@ export function useUsage() {
     await refresh();
   }, [refresh]);
 
-  return { summary, loading, refreshing, error, refresh, refreshAfterProviderChange };
+  /** 拖拽排序的乐观本地应用：按身份顺序置换 summary 启用行（禁用行不动）。
+   *  身份多重集对不上时静默不动 —— 面板与配置短暂不一致（如轮询竞态）时
+   *  宁可不改也不错改，下轮 usage-updated 自然回到真实顺序。 */
+  const applyLocalOrder = useCallback((orderedIdentities: string[]) => {
+    setSummary((cur) => {
+      if (!cur) return cur;
+      const providers = reorderPicked(
+        cur.providers,
+        (p) => p.enabled,
+        statusIdentity,
+        orderedIdentities,
+      );
+      return providers ? { ...cur, providers } : cur;
+    });
+  }, []);
+
+  return {
+    summary,
+    loading,
+    refreshing,
+    error,
+    refresh,
+    refreshAfterProviderChange,
+    applyLocalOrder,
+  };
 }

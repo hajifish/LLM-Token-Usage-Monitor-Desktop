@@ -4,10 +4,6 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 /** 位移超过该阈值才激活拖拽：点击与微动不得误触发 */
 const ACTIVATE_PX = 6;
 const FLIP_MS = 160;
-/** 换位触发点：被拖卡中心进入目标槽位该比例深度才换位。0.25 时换位
- *  需拖约 3/4 槽宽，换回触发点留在原侧 25%，死区半槽宽 —— 手感与
- *  抗边界抖动（±3px 级）的平衡点。改成中线（0.5）用户反馈拖不动 */
-const ENTER_FRAC = 0.25;
 
 interface LiveState<T> {
   items: T[];
@@ -121,16 +117,27 @@ export function useDragReorder<T>(opts: {
       g.slots = g.keys
         .map((key) => ({ key, rect: cards.current.get(key)?.getBoundingClientRect() }))
         .filter((s): s is { key: string; rect: DOMRect } => !!s.rect);
+      // 上一次手势的落位动画可能仍在飞行中，getBoundingClientRect 会拍到
+      // 动画里的偏移位置，槽位坐标系就歪了 —— 激活时先清掉残留 inline 样式
+      cards.current.forEach((el) => {
+        if (el.dataset.flipGen) {
+          el.style.transition = '';
+          el.style.transform = '';
+          delete el.dataset.flipGen;
+        }
+      });
       setDraggedKey(g.key);
     }
     setOffset({ x: ev.clientX - g.startX, y: ev.clientY - g.startY });
 
-    // 槽位命中（进入深度回滞）：被拖卡的视觉中心（当前槽位中心 + 指针位移）
-    // 进入目标槽位 ENTER_FRAC 深度才换位，换回触发点对称留在原侧 —— 死区
-    // 半槽宽，边界蹭动不触发。相邻槽位矩形相接（A.right === B.left），用
-    // 「落入矩形（含边界）」做判据死区为零，边界抖动会来回换位震荡。
-    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化）；
-    // 斜向拖动按主轴判进深、副轴放宽同比例容差，避免斜穿时卡死
+    // 槽位命中（容纳 + 中线回滞）：所有槽位可达（3+1 两行布局里第二行
+    // 卡片要能直达第一行中间，相邻一格模型到不了），但双重条件缺一不可 ——
+    // 被拖卡视觉中心（当前槽位中心 + 指针位移）落入目标槽矩形（矩形互不
+    // 重叠，候选唯一，无先后顺序抽签），且在主轴方向越过该槽中线。换回
+    // 需完整退过原槽中线，死区整槽宽；斜穿目标槽角落时中线未越过、不触发，
+    // 不会路过就被抢走。禁用任何容差放大：容差让矩形相接的邻槽同时达标、
+    // 隔行槽位凭扩展区抢匹配，真机上表现为「一放中间就弹到最边上」。
+    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化）
     const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
     const cur = g.slots[curPos];
     const curCx = cur.rect.left + cur.rect.width / 2;
@@ -140,18 +147,16 @@ export function useDragReorder<T>(opts: {
     const to = g.slots.findIndex((s, idx) => {
       if (idx === curPos) return false;
       const r = s.rect;
+      if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return false;
       const midX = r.left + r.width / 2;
       const midY = r.top + r.height / 2;
-      const slackX = r.width * ENTER_FRAC;
-      const slackY = r.height * ENTER_FRAC;
+      // 1px 容差：终点恰落在目标中心时浮点舍入会让等值比较时灵时不灵
+      // （真机快甩以格心为终点，Lane A 复现过同点成败不一）
+      const EPS = 1;
       if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
-        // 水平主轴：中心纵向落在槽内（放宽 slackY），且水平进入目标槽
-        // 近侧边 slackX 深度
-        if (cy < r.top - slackY || cy > r.bottom + slackY) return false;
-        return midX > curCx ? cx >= r.left + slackX : cx <= r.right - slackX;
+        return midX > curCx ? cx >= midX - EPS : cx <= midX + EPS;
       }
-      if (cx < r.left - slackX || cx > r.right + slackX) return false;
-      return midY > curCy ? cy >= r.top + slackY : cy <= r.bottom - slackY;
+      return midY > curCy ? cy >= midY - EPS : cy <= midY + EPS;
     });
     if (to < 0) return;
     const from = curPos;

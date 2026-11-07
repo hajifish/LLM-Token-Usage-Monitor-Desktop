@@ -420,8 +420,8 @@ pub fn create_tray(app: &AppHandle, click_opens_window: bool) -> tauri::Result<(
         &[
             &open_item,
             &separator1,
-            &update_item,
             &skills_item,
+            &update_item,
             &settings_item,
             &quit_item,
         ],

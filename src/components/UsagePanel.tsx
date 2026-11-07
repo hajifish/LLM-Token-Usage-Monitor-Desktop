@@ -1,4 +1,10 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import type { ProviderStatus, QuotaInfo, UsageSummary } from '../hooks/useUsage';
+import type { AppConfig } from '../types';
+import { configIdentity, reorderPicked, statusIdentity } from '../lib/providerOrder';
+import { useDragReorder } from '../hooks/useDragReorder';
 
 // Official brand logos downloaded from provider websites (stored in public/providers/)
 const BRAND_LOGOS: Record<string, string> = {
@@ -79,10 +85,32 @@ function QuotaRow({ q }: { q: QuotaInfo }) {
   );
 }
 
-function ProviderCard({ p, pending }: { p: ProviderStatus; pending: boolean }) {
+/** 拖拽层透传到 .p-card 根元素的属性（见 UsagePanel 的 useDragReorder 接线） */
+interface CardDragProps {
+  'data-card-key'?: string;
+  onPointerDown?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  className?: string;
+  style?: CSSProperties;
+}
+
+function ProviderCard({
+  p,
+  pending,
+  cardRef,
+  dragProps,
+}: {
+  p: ProviderStatus;
+  pending: boolean;
+  cardRef?: (el: HTMLDivElement | null) => void;
+  dragProps?: CardDragProps;
+}) {
   if (p.error) {
     return (
-      <div className="p-card p-card-error">
+      <div
+        {...dragProps}
+        ref={cardRef}
+        className={`p-card p-card-error ${dragProps?.className ?? ''}`.trim()}
+      >
         <CardHead name={p.name} alias={p.alias} badge={{ text: '异常', cls: 'red' }} />
         <p className="p-card-error-msg">{p.error}</p>
       </div>
@@ -96,7 +124,11 @@ function ProviderCard({ p, pending }: { p: ProviderStatus; pending: boolean }) {
   const warnClass = warn === 2 ? 'p-card-warn-red' : warn === 1 ? 'p-card-warn-yellow' : '';
 
   return (
-    <div className={`p-card ${warnClass}`.trim()}>
+    <div
+      {...dragProps}
+      ref={cardRef}
+      className={`p-card ${warnClass} ${dragProps?.className ?? ''}`.trim()}
+    >
       {/* Card header with brand logo */}
       <CardHead name={p.name} alias={p.alias} />
 
@@ -163,9 +195,55 @@ interface UsagePanelProps {
   refreshing: boolean;
   error: string | null;
   refresh: () => void;
+  applyLocalOrder: (orderedIdentities: string[]) => void;
 }
 
-function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanelProps) {
+function UsagePanel({
+  summary,
+  loading,
+  refreshing,
+  error,
+  refresh,
+  applyLocalOrder,
+}: UsagePanelProps) {
+  const visible = useMemo(
+    () => (summary ? summary.providers.filter((p) => p.enabled) : []),
+    [summary],
+  );
+  const [reorderToast, setReorderToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!reorderToast) return;
+    const t = setTimeout(() => setReorderToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [reorderToast]);
+
+  /** 拖拽落位提交：先乐观置换本地行序，再反向合并落盘（同 Providers.handleSave
+   *  口径，防挂载快照回滚设置页/托盘的即时改动）。身份对不上（面板与配置
+   *  竞态）则放弃落盘，下轮轮询自愈；保存失败 toast + refresh 拉回真实顺序。
+   *  复用 save_config 会附带一次立即重轮询 —— 有意不加专用后端命令。 */
+  const commitOrder = useCallback(
+    async (ids: string[]) => {
+      applyLocalOrder(ids);
+      try {
+        const fresh = await invoke<AppConfig>('get_config');
+        const providers = reorderPicked(fresh.providers, (c) => c.enabled, configIdentity, ids);
+        if (!providers) return;
+        await invoke('save_config', { newConfig: { ...fresh, providers } });
+      } catch {
+        setReorderToast('排序保存失败，已还原');
+        refresh();
+      }
+    },
+    [applyLocalOrder, refresh],
+  );
+
+  const drag = useDragReorder({
+    items: visible,
+    identityOf: statusIdentity,
+    onCommit: commitOrder,
+  });
+
   if (loading) {
     return (
       <div className="usage-panel loading">
@@ -189,8 +267,6 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
   }
 
   // Disabled providers are managed in Settings; keep the main view focused on active ones.
-  const visibleProviders = summary ? summary.providers.filter((p) => p.enabled) : [];
-
   if (!summary || summary.providers.length === 0) {
     // 真正零配置才显示添加指引
     return (
@@ -202,7 +278,7 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
     );
   }
 
-  if (visibleProviders.length === 0) {
+  if (visible.length === 0) {
     // 有配置但全部禁用：不能误导为「未配置」
     return (
       <div className="usage-panel empty">
@@ -215,10 +291,30 @@ function UsagePanel({ summary, loading, refreshing, error, refresh }: UsagePanel
 
   return (
     <div className={`usage-panel${refreshing ? ' is-refreshing' : ''}`} data-auto-height-scroller>
+      {reorderToast && <div className="reorder-toast">{reorderToast}</div>}
       <div className="card-grid">
-        {visibleProviders.map((p, i) => (
-          // alias 无自定义时回退显示名，同类型无别名双账号会重键；追加下标兜底
-          <ProviderCard key={`${p.name}-${p.alias}-${i}`} p={p} pending={refreshing && p.enabled} />
+        {drag.items.map((p, i) => (
+          // key = 身份 + 同身份出现序号：同类型双账号不重键；手势期间冻结，
+          // 换位保持同一 DOM 元素，FLIP 让位动画才成立
+          <ProviderCard
+            key={drag.keys[i]}
+            p={p}
+            pending={refreshing && p.enabled}
+            cardRef={(el) => drag.setCardRef(drag.keys[i], el)}
+            dragProps={{
+              'data-card-key': drag.keys[i],
+              onPointerDown: (e) => drag.handlePointerDown(e, i),
+              ...(drag.draggedKey === drag.keys[i] && {
+                className: 'is-dragging',
+                // 指针跟随不得被 .p-card 的 transition:all 平滑；松手清 inline
+                // 后样式表过渡自然接管，落位即回弹动画
+                style: {
+                  transform: `translate(${drag.offset.x}px, ${drag.offset.y}px) scale(1.03)`,
+                  transition: 'none',
+                },
+              }),
+            }}
+          />
         ))}
       </div>
     </div>

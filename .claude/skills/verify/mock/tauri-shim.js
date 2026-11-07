@@ -277,7 +277,15 @@
       return state.update;
     },
     'updater:download_update': () => Promise.reject('debug 构建跳过更新下载'),
-    'updater:install_update': () => Promise.reject('debug 构建拒绝安装更新'),
+    // 生产契约（updater.rs 00dc5a1）：进入安装即置 Installing 并推送
+    // update-status，事件先于网络复查等耗时步骤到达，横幅立即切安装中
+    // 形态。debug 真机构建会拒绝安装，但横幅 Installing UI 态只能沿
+    // 成功路径驱动，此处按生产契约建模（不 resolve 重启，窗口停留可断言）。
+    'updater:install_update': async () => {
+      state.update = { ...state.update, phase: 'installing', message: '正在安装更新…' };
+      emit('update-status', state.update);
+      return state.update;
+    },
   };
   // Command names arrive un-prefixed for app commands; updater commands in
   // this app are invoked as bare names from useUpdate.ts — accept both spellings.

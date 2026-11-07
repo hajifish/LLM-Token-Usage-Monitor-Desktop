@@ -302,11 +302,7 @@ async fn run_check(app: &AppHandle, manual: bool) -> UpdateStatus {
             log::warn!("更新: 检查失败: {}", e);
             let message = user_error_msg(&e);
             if manual {
-                crate::notification::send_update_check_notice(
-                    app,
-                    "⚠️ 更新检查失败",
-                    &message,
-                );
+                crate::notification::send_update_check_notice(app, "⚠️ 更新检查失败", &message);
             }
             mutate_status(app, |s| {
                 s.phase = UpdatePhase::Failed;
@@ -488,12 +484,32 @@ pub async fn install_update(app: AppHandle) -> Result<UpdateStatus, String> {
         return Err("开发构建不支持应用内安装，请使用打包后的应用验证".to_string());
     }
     let current = snapshot(&app);
+    if current.phase == UpdatePhase::Installing {
+        return Err("正在安装更新，请稍候…".to_string());
+    }
     if current.phase != UpdatePhase::Ready {
         return Err("请先下载更新包".to_string());
     }
     let Some(expected) = current.version.clone() else {
         return Err("更新包不存在，请重新检查更新".to_string());
     };
+
+    // Installing 必须先于下面的网络清单复查置位：复查耗时数秒，期间状态
+    // 若仍是 Ready，主窗口横幅的「立即安装并重启」保持可点，用户看到的
+    // 是既无进展又能重复点击的假死。置位后横幅/托盘条目立即切换到安装
+    // 中形态；复查等前置失败再恢复 Ready（区别于真正安装失败的 Failed），
+    // 横幅回到可重试形态并以内联错误展示原因。
+    mutate_status(&app, |s| {
+        s.phase = UpdatePhase::Installing;
+        s.message = Some("正在安装更新…".to_string());
+    });
+    fn prelude_failed(app: &AppHandle, message: String) -> String {
+        mutate_status(app, |s| {
+            s.phase = UpdatePhase::Ready;
+            s.message = Some(message.clone());
+        });
+        message
+    }
 
     // 安装需要 Update 实例提供的解包上下文，因此安装前再取一次清单
     let checked = match app.updater() {
@@ -503,22 +519,24 @@ pub async fn install_update(app: AppHandle) -> Result<UpdateStatus, String> {
     let update = match checked {
         Ok(Some(update)) if update.version == expected => update,
         Ok(_) => {
-            return Err("更新已不可用（可能已被撤回），请重新检查更新".to_string());
+            return Err(prelude_failed(
+                &app,
+                "更新已不可用（可能已被撤回），请重新检查更新".to_string(),
+            ));
         }
-        Err(e) => return Err(user_error_msg(&e)),
+        Err(e) => return Err(prelude_failed(&app, user_error_msg(&e))),
     };
 
     let Some((pending_version, bytes)) = take_pending(&app) else {
-        return Err("更新包不存在，请重新下载".to_string());
+        return Err(prelude_failed(&app, "更新包不存在，请重新下载".to_string()));
     };
     if pending_version != expected {
-        return Err("更新包与当前版本不匹配，请重新下载".to_string());
+        return Err(prelude_failed(
+            &app,
+            "更新包与当前版本不匹配，请重新下载".to_string(),
+        ));
     }
 
-    mutate_status(&app, |s| {
-        s.phase = UpdatePhase::Installing;
-        s.message = Some("正在安装更新…".to_string());
-    });
     log::info!("更新: 开始安装 v{}", expected);
 
     // 安装会解包并替换应用目录，macOS 下还可能弹出管理员授权，放在阻塞线程执行

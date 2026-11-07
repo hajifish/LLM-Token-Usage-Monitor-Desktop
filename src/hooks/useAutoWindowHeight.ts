@@ -19,9 +19,7 @@ const MIN_HEIGHT = 200;
  * rAF 会让测量挂起直到窗口显示，表现为开窗先闪旧尺寸再跳正。
  * MutationObserver 本身按变更批交付，无需二次合并。
  */
-export function useAutoWindowHeight(
-  view: 'usage' | 'settings' | 'providers' | 'skills',
-) {
+export function useAutoWindowHeight(view: 'usage' | 'settings' | 'providers' | 'skills') {
   const maxHeightRef = useRef<number | null>(null);
   const lastAppliedRef = useRef(0);
 
@@ -34,9 +32,7 @@ export function useAutoWindowHeight(
     let unlisten: (() => void) | undefined;
 
     const measure = () => {
-      const scroller = document.querySelector<HTMLElement>(
-        '[data-auto-height-scroller]',
-      );
+      const scroller = document.querySelector<HTMLElement>('[data-auto-height-scroller]');
       const app = document.querySelector('.app');
       const maxHeight = maxHeightRef.current;
       if (!scroller || !app || maxHeight === null) return;
@@ -44,10 +40,7 @@ export function useAutoWindowHeight(
       const appRect = app.getBoundingClientRect();
       const natural =
         scrollerRect.bottom - appRect.top + (scroller.scrollHeight - scroller.clientHeight);
-      const target = Math.min(
-        Math.max(Math.round(natural), MIN_HEIGHT),
-        Math.round(maxHeight),
-      );
+      const target = Math.min(Math.max(Math.round(natural), MIN_HEIGHT), Math.round(maxHeight));
       if (Math.abs(target - lastAppliedRef.current) >= 1) {
         lastAppliedRef.current = target;
         win.setSize(new LogicalSize(WIDTH, target)).catch((e) => {
@@ -79,10 +72,12 @@ export function useAutoWindowHeight(
       subtree: true,
       characterData: true,
     });
-    win.onResized(() => measure()).then((fn) => {
-      if (disposed) fn();
-      else unlisten = fn;
-    });
+    win
+      .onResized(() => measure())
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      });
 
     return () => {
       disposed = true;

@@ -26,6 +26,11 @@ interface Gesture<T> {
    *  elementsFromPoint，后者命中的是 FLIP 动画中卡片的绘制位置，快速
    *  拖动时会目标震荡 */
   slots: { key: string; rect: DOMRect }[];
+  /** 起点槽位矩形：判定中心与渲染位移的锚。换位后当前槽位改变，但锚
+   *  不变 —— 中心若按「当前槽位 + 起点量的全程位移」计算，换位瞬间会
+   *  凭空多出一格越界量，下一 move 立即连环换位，卡片飞到最远端
+   *  （真机反馈「拖到中间弹到最边上」的根因） */
+  originRect: DOMRect;
   cleanup: () => void;
 }
 
@@ -84,6 +89,48 @@ export function useDragReorder<T>(opts: {
     else cards.current.delete(key);
   }, []);
 
+  /** 槽位命中（容纳 + 中线回滞）：所有槽位可达（3+1 两行布局里第二行
+   *  卡片要能直达第一行中间，相邻一格模型到不了），但双重条件缺一不可 ——
+   *  被拖卡视觉中心落入目标槽矩形（矩形互不重叠，候选唯一，无先后顺序
+   *  抽签），且在主轴方向越过该槽中线。判定中心纯指针驱动（起点槽位锚
+   *  + 全程位移），换位后不重锚 —— 若按「当前槽位 + 全程位移」计算，
+   *  换位瞬间凭空多出一格越界量，下一 move 连环换位，卡片飞到最远端
+   *  （真机反馈「拖到中间弹到最边上」的根因）。换回需完整退过原槽中线，
+   *  死区整槽宽；斜穿目标槽角落时中线未越过、不触发，不会路过就被抢走。
+   *  禁用任何容差放大。槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/
+   *  跟随 transform 变化）。返回换位后的位置 */
+  const evaluateSwap = useCallback((g: Gesture<T>, clientX: number, clientY: number): number => {
+    const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
+    const cur = g.slots[curPos];
+    const cx = g.originRect.left + g.originRect.width / 2 + (clientX - g.startX);
+    const cy = g.originRect.top + g.originRect.height / 2 + (clientY - g.startY);
+    const curCx = cur.rect.left + cur.rect.width / 2;
+    const curCy = cur.rect.top + cur.rect.height / 2;
+    const to = g.slots.findIndex((s, idx) => {
+      if (idx === curPos) return false;
+      const r = s.rect;
+      if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return false;
+      const midX = r.left + r.width / 2;
+      const midY = r.top + r.height / 2;
+      // 1px 容差：终点恰落在目标中心时浮点舍入会让等值比较时灵时不灵
+      // （真机快甩以格心为终点，Lane A 复现过同点成败不一）
+      const EPS = 1;
+      if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
+        return midX > curCx ? cx >= midX - EPS : cx <= midX + EPS;
+      }
+      return midY > curCy ? cy >= midY - EPS : cy <= midY + EPS;
+    });
+    if (to < 0 || to === curPos) return curPos;
+    // FLIP 基线：重排前的视口坐标
+    prevRects.current.clear();
+    cards.current.forEach((el, key) => prevRects.current.set(key, el.getBoundingClientRect()));
+    const perm = g.perm.slice();
+    perm.splice(to, 0, perm.splice(curPos, 1)[0]);
+    g.perm = perm;
+    setLive({ items: perm.map((i) => g.snapshot[i]), keys: perm.map((i) => g.keys[i]) });
+    return to;
+  }, []);
+
   const endGesture = useCallback((ev: PointerEvent) => {
     const g = gesture.current;
     if (!g || ev.pointerId !== g.pointerId) return;
@@ -93,13 +140,16 @@ export function useDragReorder<T>(opts: {
     // WebKit 双保险：激活时清过一次，结束时再清（见 handlePointerDown 注释）
     window.getSelection()?.removeAllRanges();
     if (!g.active) return;
+    // 松手前用最终坐标再判定一次换位：无停顿快甩时浏览器会合并
+    // pointermove，最后一跃可能不产生 move 事件（Lane A 复现过）
+    evaluateSwap(g, ev.clientX, ev.clientY);
     setDraggedKey(null);
     setOffset({ x: 0, y: 0 });
     setLive(null);
     // 未产生实际换位（误激活、边界蹭动）不提交：落盘会附带一次全量重轮询
     if (g.perm.every((v, i) => v === i)) return;
     latest.current.onCommit(g.perm.map((i) => latest.current.identityOf(g.snapshot[i])));
-  }, []);
+  }, [evaluateSwap]);
 
   const beginMove = useCallback((ev: PointerEvent) => {
     const g = gesture.current;
@@ -117,6 +167,8 @@ export function useDragReorder<T>(opts: {
       g.slots = g.keys
         .map((key) => ({ key, rect: cards.current.get(key)?.getBoundingClientRect() }))
         .filter((s): s is { key: string; rect: DOMRect } => !!s.rect);
+      const originIdx = g.keys.indexOf(g.key);
+      if (originIdx >= 0 && g.slots[originIdx]) g.originRect = g.slots[originIdx].rect;
       // 上一次手势的落位动画可能仍在飞行中，getBoundingClientRect 会拍到
       // 动画里的偏移位置，槽位坐标系就歪了 —— 激活时先清掉残留 inline 样式
       cards.current.forEach((el) => {
@@ -128,48 +180,18 @@ export function useDragReorder<T>(opts: {
       });
       setDraggedKey(g.key);
     }
-    setOffset({ x: ev.clientX - g.startX, y: ev.clientY - g.startY });
 
-    // 槽位命中（容纳 + 中线回滞）：所有槽位可达（3+1 两行布局里第二行
-    // 卡片要能直达第一行中间，相邻一格模型到不了），但双重条件缺一不可 ——
-    // 被拖卡视觉中心（当前槽位中心 + 指针位移）落入目标槽矩形（矩形互不
-    // 重叠，候选唯一，无先后顺序抽签），且在主轴方向越过该槽中线。换回
-    // 需完整退过原槽中线，死区整槽宽；斜穿目标槽角落时中线未越过、不触发，
-    // 不会路过就被抢走。禁用任何容差放大：容差让矩形相接的邻槽同时达标、
-    // 隔行槽位凭扩展区抢匹配，真机上表现为「一放中间就弹到最边上」。
-    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化）
-    const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
-    const cur = g.slots[curPos];
-    const curCx = cur.rect.left + cur.rect.width / 2;
-    const curCy = cur.rect.top + cur.rect.height / 2;
-    const cx = curCx + (ev.clientX - g.startX);
-    const cy = curCy + (ev.clientY - g.startY);
-    const to = g.slots.findIndex((s, idx) => {
-      if (idx === curPos) return false;
-      const r = s.rect;
-      if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return false;
-      const midX = r.left + r.width / 2;
-      const midY = r.top + r.height / 2;
-      // 1px 容差：终点恰落在目标中心时浮点舍入会让等值比较时灵时不灵
-      // （真机快甩以格心为终点，Lane A 复现过同点成败不一）
-      const EPS = 1;
-      if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
-        return midX > curCx ? cx >= midX - EPS : cx <= midX + EPS;
-      }
-      return midY > curCy ? cy >= midY - EPS : cy <= midY + EPS;
+    const pos = evaluateSwap(g, ev.clientX, ev.clientY);
+
+    // 渲染位移：扣掉最终槽位相对起点槽位的差值，换位后卡片钉在指针底下。
+    // 必须在换位判定之后按新槽位计算 —— 否则换位当帧用的是旧槽位偏移，
+    // 卡片闪跳一格（Lane A 逐帧断言实测 316px 跳变）
+    const fin = g.slots[pos];
+    setOffset({
+      x: ev.clientX - g.startX - (fin.rect.left - g.originRect.left),
+      y: ev.clientY - g.startY - (fin.rect.top - g.originRect.top),
     });
-    if (to < 0) return;
-    const from = curPos;
-
-    // FLIP 基线：重排前的视口坐标
-    prevRects.current.clear();
-    cards.current.forEach((el, key) => prevRects.current.set(key, el.getBoundingClientRect()));
-
-    const perm = g.perm.slice();
-    perm.splice(to, 0, perm.splice(from, 1)[0]);
-    g.perm = perm;
-    setLive({ items: perm.map((i) => g.snapshot[i]), keys: perm.map((i) => g.keys[i]) });
-  }, []);
+  }, [evaluateSwap]);
 
   // FLIP：重排后从旧位置动画到新位置。inline transition 会覆盖样式表
   // .p-card 的 transition:all，动画结束必须清掉，否则卡片 hover 过渡失效
@@ -235,6 +257,8 @@ export function useDragReorder<T>(opts: {
         keys: idleKeys,
         perm: items.map((_, i) => i),
         slots: [],
+        // 占位：激活时以冻结槽位表为准覆写；beginMove 仅在激活后才使用
+        originRect: new DOMRect(),
         cleanup: detach,
       };
     },

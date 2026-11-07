@@ -4,6 +4,10 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 /** 位移超过该阈值才激活拖拽：点击与微动不得误触发 */
 const ACTIVATE_PX = 6;
 const FLIP_MS = 160;
+/** 换位触发点：被拖卡中心进入目标槽位该比例深度才换位。0.25 时换位
+ *  需拖约 3/4 槽宽，换回触发点留在原侧 25%，死区半槽宽 —— 手感与
+ *  抗边界抖动（±3px 级）的平衡点。改成中线（0.5）用户反馈拖不动 */
+const ENTER_FRAC = 0.25;
 
 interface LiveState<T> {
   items: T[];
@@ -90,6 +94,8 @@ export function useDragReorder<T>(opts: {
     gesture.current = null;
     g.cleanup();
     document.body.classList.remove('card-dragging');
+    // WebKit 双保险：激活时清过一次，结束时再清（见 handlePointerDown 注释）
+    window.getSelection()?.removeAllRanges();
     if (!g.active) return;
     setDraggedKey(null);
     setOffset({ x: 0, y: 0 });
@@ -119,11 +125,12 @@ export function useDragReorder<T>(opts: {
     }
     setOffset({ x: ev.clientX - g.startX, y: ev.clientY - g.startY });
 
-    // 槽位命中（中线回滞）：被拖卡的视觉中心（当前槽位中心 + 指针位移）
-    // 越过目标槽位中线才换位；换回需退过原槽位中线。两中线相隔整槽宽，
-    // 边界抖动天然落在死区内不触发。相邻槽位矩形相接（A.right === B.left），
-    // 用「进入矩形」做判据死区为零，边界蹭动仍会震荡——必须比中线。
-    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化）
+    // 槽位命中（进入深度回滞）：被拖卡的视觉中心（当前槽位中心 + 指针位移）
+    // 进入目标槽位 ENTER_FRAC 深度才换位，换回触发点对称留在原侧 —— 死区
+    // 半槽宽，边界蹭动不触发。相邻槽位矩形相接（A.right === B.left），用
+    // 「落入矩形（含边界）」做判据死区为零，边界抖动会来回换位震荡。
+    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化）；
+    // 斜向拖动按主轴判进深、副轴放宽同比例容差，避免斜穿时卡死
     const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
     const cur = g.slots[curPos];
     const curCx = cur.rect.left + cur.rect.width / 2;
@@ -135,13 +142,16 @@ export function useDragReorder<T>(opts: {
       const r = s.rect;
       const midX = r.left + r.width / 2;
       const midY = r.top + r.height / 2;
+      const slackX = r.width * ENTER_FRAC;
+      const slackY = r.height * ENTER_FRAC;
       if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
-        // 水平主轴邻槽：越过其竖直中线，且中心纵向落在槽内
-        const crossed = midX < curCx ? cx <= midX : cx >= midX;
-        return crossed && cy >= r.top && cy <= r.bottom;
+        // 水平主轴：中心纵向落在槽内（放宽 slackY），且水平进入目标槽
+        // 近侧边 slackX 深度
+        if (cy < r.top - slackY || cy > r.bottom + slackY) return false;
+        return midX > curCx ? cx >= r.left + slackX : cx <= r.right - slackX;
       }
-      const crossed = midY < curCy ? cy <= midY : cy >= midY;
-      return crossed && cx >= r.left && cx <= r.right;
+      if (cx < r.left - slackX || cx > r.right + slackX) return false;
+      return midY > curCy ? cy >= r.top + slackY : cy <= r.bottom - slackY;
     });
     if (to < 0) return;
     const from = curPos;
@@ -192,6 +202,11 @@ export function useDragReorder<T>(opts: {
   const handlePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLElement>, index: number) => {
       if (e.button !== 0 || gesture.current) return;
+      // 原生文本选择手势在 pointerdown 即被浏览器武装，激活后再清选区
+      // （removeAllRanges + user-select:none）在 WebKit 上拦不住已启动的
+      // 选择继续扩展 —— 必须在起点就 preventDefault 断掉它。代价是卡片
+      // 文字不可划选复制，换稳定的拖拽体验
+      e.preventDefault();
       const move = (ev: PointerEvent) => beginMove(ev);
       const detach = () => {
         window.removeEventListener('pointermove', move);

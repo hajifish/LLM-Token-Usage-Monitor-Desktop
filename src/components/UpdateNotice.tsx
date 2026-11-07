@@ -227,9 +227,7 @@ function UpdateNotice() {
               立即安装并重启
             </button>
           )}
-          {status.phase === 'installing' && (
-            <span className="update-hint">应用即将自动重启…</span>
-          )}
+          {status.phase === 'installing' && <span className="update-hint">应用即将自动重启…</span>}
           {(status.phase === 'available' || status.phase === 'ready') && (
             <button className="update-btn ghost" onClick={() => setAcknowledged(key)}>
               稍后

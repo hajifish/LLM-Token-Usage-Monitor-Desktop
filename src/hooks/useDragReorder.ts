@@ -94,6 +94,8 @@ export function useDragReorder<T>(opts: {
     setDraggedKey(null);
     setOffset({ x: 0, y: 0 });
     setLive(null);
+    // 未产生实际换位（误激活、边界蹭动）不提交：落盘会附带一次全量重轮询
+    if (g.perm.every((v, i) => v === i)) return;
     latest.current.onCommit(g.perm.map((i) => latest.current.identityOf(g.snapshot[i])));
   }, []);
 
@@ -117,21 +119,32 @@ export function useDragReorder<T>(opts: {
     }
     setOffset({ x: ev.clientX - g.startX, y: ev.clientY - g.startY });
 
-    // 槽位区域命中：指针落在哪个原始槽位，就与当前占据该槽位的项换位。
-    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化），
-    // 快速拖动也稳定；被拖项自己占据的槽位是 no-op
-    const slot = g.slots.find(
-      (s) =>
-        s.key !== g.key &&
-        ev.clientX >= s.rect.left &&
-        ev.clientX <= s.rect.right &&
-        ev.clientY >= s.rect.top &&
-        ev.clientY <= s.rect.bottom,
-    );
-    if (!slot) return;
-    const from = g.perm.findIndex((i) => g.keys[i] === g.key);
-    const to = g.perm.findIndex((i) => g.keys[i] === slot.key);
-    if (from < 0 || to < 0 || from === to) return;
+    // 槽位命中（中线回滞）：被拖卡的视觉中心（当前槽位中心 + 指针位移）
+    // 越过目标槽位中线才换位；换回需退过原槽位中线。两中线相隔整槽宽，
+    // 边界抖动天然落在死区内不触发。相邻槽位矩形相接（A.right === B.left），
+    // 用「进入矩形」做判据死区为零，边界蹭动仍会震荡——必须比中线。
+    // 槽位矩形在激活瞬间冻结（布局坐标，不随 FLIP/跟随 transform 变化）
+    const curPos = g.perm.findIndex((i) => g.keys[i] === g.key);
+    const cur = g.slots[curPos];
+    const curCx = cur.rect.left + cur.rect.width / 2;
+    const curCy = cur.rect.top + cur.rect.height / 2;
+    const cx = curCx + (ev.clientX - g.startX);
+    const cy = curCy + (ev.clientY - g.startY);
+    const to = g.slots.findIndex((s, idx) => {
+      if (idx === curPos) return false;
+      const r = s.rect;
+      const midX = r.left + r.width / 2;
+      const midY = r.top + r.height / 2;
+      if (Math.abs(midX - curCx) >= Math.abs(midY - curCy)) {
+        // 水平主轴邻槽：越过其竖直中线，且中心纵向落在槽内
+        const crossed = midX < curCx ? cx <= midX : cx >= midX;
+        return crossed && cy >= r.top && cy <= r.bottom;
+      }
+      const crossed = midY < curCy ? cy <= midY : cy >= midY;
+      return crossed && cx >= r.left && cx <= r.right;
+    });
+    if (to < 0) return;
+    const from = curPos;
 
     // FLIP 基线：重排前的视口坐标
     prevRects.current.clear();

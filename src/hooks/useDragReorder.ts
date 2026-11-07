@@ -138,68 +138,74 @@ export function useDragReorder<T>(opts: {
     [],
   );
 
-  const endGesture = useCallback((ev: PointerEvent) => {
-    const g = gesture.current;
-    if (!g || ev.pointerId !== g.pointerId) return;
-    gesture.current = null;
-    g.cleanup();
-    document.body.classList.remove('card-dragging');
-    // WebKit 双保险：激活时清过一次，结束时再清（见 handlePointerDown 注释）
-    window.getSelection()?.removeAllRanges();
-    if (!g.active) return;
-    // 松手前用最终坐标再判定一次换位：无停顿快甩时浏览器会合并
-    // pointermove，最后一跃可能不产生 move 事件（Lane A 复现过）；
-    // 终判只看容纳 —— 落点在哪个格就落哪个格，不因中线未过而回弹
-    evaluateSwap(g, ev.clientX, ev.clientY, true);
-    setDraggedKey(null);
-    setOffset({ x: 0, y: 0 });
-    setLive(null);
-    // 未产生实际换位（误激活、边界蹭动）不提交：落盘会附带一次全量重轮询
-    if (g.perm.every((v, i) => v === i)) return;
-    latest.current.onCommit(g.perm.map((i) => latest.current.identityOf(g.snapshot[i])));
-  }, [evaluateSwap]);
-
-  const beginMove = useCallback((ev: PointerEvent) => {
-    const g = gesture.current;
-    if (!g || ev.pointerId !== g.pointerId) return;
-    if (!g.active) {
-      if (Math.hypot(ev.clientX - g.startX, ev.clientY - g.startY) < ACTIVATE_PX) return;
-      g.active = true;
-      document.body.classList.add('card-dragging');
+  const endGesture = useCallback(
+    (ev: PointerEvent) => {
+      const g = gesture.current;
+      if (!g || ev.pointerId !== g.pointerId) return;
+      gesture.current = null;
+      g.cleanup();
+      document.body.classList.remove('card-dragging');
+      // WebKit 双保险：激活时清过一次，结束时再清（见 handlePointerDown 注释）
       window.getSelection()?.removeAllRanges();
-      try {
-        cards.current.get(g.key)?.setPointerCapture(g.pointerId);
-      } catch {
-        // 捕获失败只损失窗外跟踪，窗口内手势不受影响
-      }
-      g.slots = g.keys
-        .map((key) => ({ key, rect: cards.current.get(key)?.getBoundingClientRect() }))
-        .filter((s): s is { key: string; rect: DOMRect } => !!s.rect);
-      const originIdx = g.keys.indexOf(g.key);
-      if (originIdx >= 0 && g.slots[originIdx]) g.originRect = g.slots[originIdx].rect;
-      // 上一次手势的落位动画可能仍在飞行中，getBoundingClientRect 会拍到
-      // 动画里的偏移位置，槽位坐标系就歪了 —— 激活时先清掉残留 inline 样式
-      cards.current.forEach((el) => {
-        if (el.dataset.flipGen) {
-          el.style.transition = '';
-          el.style.transform = '';
-          delete el.dataset.flipGen;
+      if (!g.active) return;
+      // 松手前用最终坐标再判定一次换位：无停顿快甩时浏览器会合并
+      // pointermove，最后一跃可能不产生 move 事件（Lane A 复现过）；
+      // 终判只看容纳 —— 落点在哪个格就落哪个格，不因中线未过而回弹
+      evaluateSwap(g, ev.clientX, ev.clientY, true);
+      setDraggedKey(null);
+      setOffset({ x: 0, y: 0 });
+      setLive(null);
+      // 未产生实际换位（误激活、边界蹭动）不提交：落盘会附带一次全量重轮询
+      if (g.perm.every((v, i) => v === i)) return;
+      latest.current.onCommit(g.perm.map((i) => latest.current.identityOf(g.snapshot[i])));
+    },
+    [evaluateSwap],
+  );
+
+  const beginMove = useCallback(
+    (ev: PointerEvent) => {
+      const g = gesture.current;
+      if (!g || ev.pointerId !== g.pointerId) return;
+      if (!g.active) {
+        if (Math.hypot(ev.clientX - g.startX, ev.clientY - g.startY) < ACTIVATE_PX) return;
+        g.active = true;
+        document.body.classList.add('card-dragging');
+        window.getSelection()?.removeAllRanges();
+        try {
+          cards.current.get(g.key)?.setPointerCapture(g.pointerId);
+        } catch {
+          // 捕获失败只损失窗外跟踪，窗口内手势不受影响
         }
+        g.slots = g.keys
+          .map((key) => ({ key, rect: cards.current.get(key)?.getBoundingClientRect() }))
+          .filter((s): s is { key: string; rect: DOMRect } => !!s.rect);
+        const originIdx = g.keys.indexOf(g.key);
+        if (originIdx >= 0 && g.slots[originIdx]) g.originRect = g.slots[originIdx].rect;
+        // 上一次手势的落位动画可能仍在飞行中，getBoundingClientRect 会拍到
+        // 动画里的偏移位置，槽位坐标系就歪了 —— 激活时先清掉残留 inline 样式
+        cards.current.forEach((el) => {
+          if (el.dataset.flipGen) {
+            el.style.transition = '';
+            el.style.transform = '';
+            delete el.dataset.flipGen;
+          }
+        });
+        setDraggedKey(g.key);
+      }
+
+      const pos = evaluateSwap(g, ev.clientX, ev.clientY, false);
+
+      // 渲染位移：扣掉最终槽位相对起点槽位的差值，换位后卡片钉在指针底下。
+      // 必须在换位判定之后按新槽位计算 —— 否则换位当帧用的是旧槽位偏移，
+      // 卡片闪跳一格（Lane A 逐帧断言实测 316px 跳变）
+      const fin = g.slots[pos];
+      setOffset({
+        x: ev.clientX - g.startX - (fin.rect.left - g.originRect.left),
+        y: ev.clientY - g.startY - (fin.rect.top - g.originRect.top),
       });
-      setDraggedKey(g.key);
-    }
-
-    const pos = evaluateSwap(g, ev.clientX, ev.clientY, false);
-
-    // 渲染位移：扣掉最终槽位相对起点槽位的差值，换位后卡片钉在指针底下。
-    // 必须在换位判定之后按新槽位计算 —— 否则换位当帧用的是旧槽位偏移，
-    // 卡片闪跳一格（Lane A 逐帧断言实测 316px 跳变）
-    const fin = g.slots[pos];
-    setOffset({
-      x: ev.clientX - g.startX - (fin.rect.left - g.originRect.left),
-      y: ev.clientY - g.startY - (fin.rect.top - g.originRect.top),
-    });
-  }, [evaluateSwap]);
+    },
+    [evaluateSwap],
+  );
 
   // FLIP：重排后从旧位置动画到新位置。inline transition 会覆盖样式表
   // .p-card 的 transition:all，动画结束必须清掉，否则卡片 hover 过渡失效

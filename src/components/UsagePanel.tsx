@@ -238,7 +238,11 @@ function UsagePanel({
     [applyLocalOrder, refresh],
   );
 
-  const drag = useDragReorder({ items: visible, identityOf: statusIdentity, onCommit: commitOrder });
+  const drag = useDragReorder({
+    items: visible,
+    identityOf: statusIdentity,
+    onCommit: commitOrder,
+  });
 
   if (loading) {
     return (

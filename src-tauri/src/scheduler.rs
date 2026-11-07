@@ -361,11 +361,17 @@ fn apply_menu_alignment(blocks: &mut [ProviderMenuBlock], providers: &[&Provider
     }
 }
 
+/// 托盘菜单行集：只取启用供应商。停用项仍会进 summary（主页要显示并管理它们），
+/// 但不占托盘行；签名与菜单两条更新路径（原地改写/整体重建）共用此过滤，
+/// 拨动 enabled 必改变签名 → 触发重建，停用行即时消失。
+fn tray_visible_providers(summary: &UsageSummary) -> Vec<&ProviderStatus> {
+    summary.providers.iter().filter(|p| p.enabled).collect()
+}
+
 /// 供应商列表签名：name|alias|quota名序列。签名不变时托盘菜单只原地改写文案；
 /// quota 窗口数量/顺序变化（影响菜单结构）时触发整体重建。
 fn provider_signature(summary: &UsageSummary) -> String {
-    summary
-        .providers
+    tray_visible_providers(summary)
         .iter()
         .map(|p| {
             let quotas = p
@@ -726,9 +732,8 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
                 if handles.signature == signature {
                     let now = Utc::now();
                     // 先整体生成再对齐：无明细行的标题要做右对齐，目标列取决于所有行
-                    let providers: Vec<&ProviderStatus> = summary
-                        .providers
-                        .iter()
+                    let providers: Vec<&ProviderStatus> = tray_visible_providers(summary)
+                        .into_iter()
                         .take(handles.provider_blocks.len())
                         .collect();
                     let mut blocks: Vec<ProviderMenuBlock> = providers
@@ -773,8 +778,9 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         //    enabled 展示行点击无动作（id 无 on_menu_event 匹配），代价仅是点击后菜单收起。
         const MAX_PROVIDER_BLOCKS: usize = 50;
         let now = Utc::now();
+        let all_visible = tray_visible_providers(summary);
         let providers: Vec<&ProviderStatus> =
-            summary.providers.iter().take(MAX_PROVIDER_BLOCKS).collect();
+            all_visible.iter().copied().take(MAX_PROVIDER_BLOCKS).collect();
         let mut blocks: Vec<ProviderMenuBlock> = providers
             .iter()
             .map(|p| provider_menu_block(p, now))
@@ -823,8 +829,8 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         }
 
         // 2) 超过上限则追加截断提示
-        if summary.providers.len() > MAX_PROVIDER_BLOCKS {
-            let text = format!("…共 {} 个供应商", summary.providers.len());
+        if all_visible.len() > MAX_PROVIDER_BLOCKS {
+            let text = format!("…共 {} 个供应商", all_visible.len());
             if let Ok(item) =
                 MenuItem::with_id(app_handle, "provider_overflow", &text, true, None::<&str>)
             {
@@ -832,8 +838,8 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
             }
         }
 
-        // 3) 没有任何服务商时放一个占位项
-        if summary.providers.is_empty() {
+        // 3) 没有任何服务商时放一个占位项（全部停用同此：托盘无行可展示）
+        if all_visible.is_empty() {
             if let Ok(item) =
                 MenuItem::with_id(app_handle, "no_provider", "暂无服务商", true, None::<&str>)
             {
@@ -1005,6 +1011,26 @@ mod tests {
         let mut two = one.clone();
         two.providers.push(status_with("Zhipu", "Zhipu"));
         assert_ne!(provider_signature(&one), provider_signature(&two));
+    }
+
+    #[test]
+    fn signature_drops_disabled_providers() {
+        let mut disabled = status_with("DeepSeek", "工作号");
+        disabled.enabled = false;
+        let with_disabled = UsageSummary {
+            providers: vec![status_with("Zhipu", "智谱"), disabled],
+            ..Default::default()
+        };
+        let only_enabled = UsageSummary {
+            providers: vec![status_with("Zhipu", "智谱")],
+            ..Default::default()
+        };
+        // 停用项不进签名：拨动 enabled 必改变签名 → 触发托盘菜单重建，行即时消失
+        assert_eq!(
+            provider_signature(&with_disabled),
+            provider_signature(&only_enabled),
+            "停用供应商不应计入签名"
+        );
     }
 
     #[test]

@@ -46,14 +46,26 @@ First run compiles the whole Rust stack (minutes); `src-tauri/target/debug` usua
 ```bash
 # 0. CONFIG GUARD — the dev build reads AND writes the same config file as the
 #    installed app (no data-dir override exists). Snapshot before, restore after.
+#    Use a UNIQUE suffix per session: parallel sessions using the same
+#    .verify-bak name have clobbered each other's snapshots (real incident).
 CFG="$HOME/Library/Application Support/com.hajifish.llm-token-monitor/config.json"
-[ -f "$CFG" ] && cp "$CFG" "$CFG.verify-bak"
+[ -f "$CFG" ] && cp "$CFG" "$CFG.verify-bak-<session-id>"
 
 # 1. Launch (GUI window + tray appear on this Mac)
 nohup npm run tauri dev > /tmp/verify-tauri-dev.log 2>&1 & echo "tauri dev pid $!"
+#    Bare binary also works for tray-only paths (no vite needed):
+#    nohup src-tauri/target/debug/local-llm-token-usage-monitor > /tmp/verify-app.log 2>&1 &
 ```
 
 Ready when the log shows cargo's `Finished`/`Running \`target/debug/local-llm-token-usage-monitor\`` line AND the process exists (`pgrep -f 'target/debug/local-llm-token-usage-monitor'`), typically 10-60 s after a warm build. The window shows the real usage panel only if providers are configured in the real config — an empty/error panel is a valid state, not a failure. Debug builds skip the auto-update check and refuse to install updates (by design).
+
+**Tray driving (macOS)** — to click tray menu items: address the process by **unix id** (multiple same-name instances share the menu bar; never address by name), and click with **CGEvent synthesis, never AXPress** — muda does not fire handlers for `click menu item` in System Events; the AX click "succeeds" silently and nothing happens (cost a full debugging session twice). Use the helper:
+
+```bash
+osascript -l JavaScript .claude/skills/verify/scripts/tray-cgclick.jxa <pid> [item-substring]
+```
+
+It CGEvent-clicks the tray icon (opens menu), AX-reads the item's laid-out position, then CGEvent-clicks the item, retrying layout races. Reading menu structure stays plain AX (`name of every menu item of menu 1 of menu bar item 1 of menu bar 2`, by unix id).
 
 ## Doctor
 

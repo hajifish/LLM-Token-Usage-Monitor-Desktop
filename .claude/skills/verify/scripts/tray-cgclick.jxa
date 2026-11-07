@@ -1,0 +1,50 @@
+// Verification helper — CGEvent-synthesized tray click on macOS.
+// WHY CGEvent: muda (Tauri's menu lib) does NOT fire handlers for AXPress
+// (`click menu item` in System Events) — the click "succeeds" silently and the
+// handler never runs. All events here are real synthesized mouse events;
+// coordinates come from AX reads (unix-id addressed, see SKILL.md Lane B).
+//
+// Usage: osascript -l JavaScript tray-cgclick.jxa <pid> [item-substring]
+//   pid            the app process unix id (never address tray icons by name —
+//                  multiple same-name instances share the menu bar)
+//   item-substring menu item text to click (default "检查更新")
+// Retries layout races internally: re-opens and re-reads until the item
+// yields a sane position (x>50), max 3 rounds. Prints the clicked coordinates
+// or a failure reason.
+ObjC.import('CoreGraphics')
+
+function cgClick(x, y) {
+  const d = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseDown, $.CGPointMake(x, y), $.kCGMouseButtonLeft)
+  const u = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseUp, $.CGPointMake(x, y), $.kCGMouseButtonLeft)
+  $.CGEventPost($.kCGHIDEventTap, d)
+  delay(0.06)
+  $.CGEventPost($.kCGHIDEventTap, u)
+}
+
+function run(argv) {
+  const pid = parseInt(argv[0])
+  const want = argv[1] || '检查更新'
+  const se = Application('System Events')
+  const proc = se.applicationProcesses.whose({unixId: pid})[0]
+  const mbItem = proc.menuBars[1].menuBarItems[0]
+  const ip = mbItem.position(), is = mbItem.size()
+  const ix = ip[0] + is[0] / 2, iy = ip[1] + is[1] / 2
+  for (let round = 0; round < 3; round++) {
+    cgClick(ix, iy) // real click on the tray icon opens the menu
+    delay(0.45)
+    let target = null
+    const items = mbItem.menus[0].menuItems
+    for (let i = 0; i < items.length; i++) {
+      const n = items[i].name()
+      if (n && n.indexOf(want) >= 0) { target = items[i]; break }
+    }
+    if (!target) { delay(0.4); continue } // menu not open yet — retry
+    const p = target.position(), s = target.size()
+    const cx = p[0] + s[0] / 2, cy = p[1] + s[1] / 2
+    if (cx < 50 || cy < 5) { delay(0.4); continue } // first frame not laid out — retry
+    delay(0.1)
+    cgClick(cx, cy)
+    return `clicked "${want}" at ${cx.toFixed(0)},${cy.toFixed(0)} (round ${round + 1})`
+  }
+  return `failed: menu/item "${want}" never yielded a clickable position`
+}

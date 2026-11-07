@@ -15,7 +15,15 @@ import { useAutoWindowHeight } from './hooks/useAutoWindowHeight';
 function App() {
   const [view, setView] = useState<'usage' | 'settings' | 'providers' | 'skills'>('usage');
   useAutoWindowHeight(view);
-  const { summary, loading, refreshing, error, refresh, refreshAfterProviderChange } = useUsage();
+  const {
+    summary,
+    loading,
+    refreshing,
+    error,
+    refresh,
+    refreshAfterProviderChange,
+    applyLocalOrder,
+  } = useUsage();
   const background = useFrozenBackground();
   const [appVersion, setAppVersion] = useState<string | null>(null);
 
@@ -114,6 +122,7 @@ function App() {
               refreshing={refreshing}
               error={error}
               refresh={refresh}
+              applyLocalOrder={applyLocalOrder}
             />
           </div>
         ) : view === 'settings' ? (

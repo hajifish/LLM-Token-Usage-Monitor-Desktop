@@ -340,6 +340,14 @@ pub fn update_tray_badge(app: &AppHandle, summary: &UsageSummary) {
         return;
     };
     let Ok(base) = Image::from_path(tray_icon_path(app)) else {
+        // 图标文件缺失（如历史版本的安装包未携带 icons/ 资源，且编译期源码
+        // 目录在用户机器上不存在）时回退窗口默认图标：logo 模式必须保证有图
+        // 可显，否则文字模式 set_icon(None) 之后托盘变成不可见的空条目。
+        // 告警打点依赖原图像素，回退路径无点可打，仅保底显示。
+        if let Some(fallback) = app.default_window_icon().cloned() {
+            log::warn!("Tray: 图标文件缺失，回退窗口默认图标（无告警打点）");
+            let _ = tray.set_icon(Some(fallback));
+        }
         return;
     };
     let (w, h) = (base.width(), base.height());

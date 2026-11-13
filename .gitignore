@@ -19,6 +19,9 @@ src-tauri/target/
 # 本地工具产物（Playwright MCP 会话日志等）
 .playwright-mcp/
 
+# 会话工作留痕（poteto-mode todo / 决策日志，本地产物不入库）
+.audit/
+
 # OS
 .DS_Store
 Thumbs.db

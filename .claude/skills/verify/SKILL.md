@@ -67,6 +67,11 @@ osascript -l JavaScript .claude/skills/verify/scripts/tray-cgclick.jxa <pid> [it
 
 It CGEvent-clicks the tray icon (opens menu), AX-reads the item's laid-out position, then CGEvent-clicks the item, retrying layout races. Reading menu structure stays plain AX (`name of every menu item of menu 1 of menu bar item 1 of menu bar 2`, by unix id).
 
+**Known failure modes of tray driving / measurement (2026-11-13 session):**
+- On multi-display setups the AX coordinates of menu-bar items on the secondary display are offset by hundreds of points from the CGEvent space (AX y also wobbles); the helper then clicks empty space and the menu never opens. Verify the click target independently (post a `kCGEventMouseMoved` and read back `NSEvent.mouseLocation`) before trusting it.
+- Even a verified on-target CGEvent click can fail to reach muda's TrayTarget `mouseDown:` (cause undetermined; suspected menu-bar manager interference). When clicks won't land, drive state from inside the app instead: a temporary `#[cfg(debug_assertions)]` env-gated hook that mutates the in-memory `AppConfig` state and calls `notify_one()` replays any tray scenario through the real scheduler path without touching the UI.
+- Measuring tray geometry: `tray.rect()` from app code (log it) is the only ground truth. AX `size` is unreliable on the secondary display, and pixel kill-diffs are polluted by neighboring variable-width items (a network-throughput monitor's text expands into freed space and mimics "our item's dead width").
+
 ## Doctor
 
 Run first whenever anything looks off. Read-only.

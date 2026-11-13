@@ -779,8 +779,11 @@ async fn update_tray_menu(app_handle: &AppHandle, summary: &UsageSummary) {
         const MAX_PROVIDER_BLOCKS: usize = 50;
         let now = Utc::now();
         let all_visible = tray_visible_providers(summary);
-        let providers: Vec<&ProviderStatus> =
-            all_visible.iter().copied().take(MAX_PROVIDER_BLOCKS).collect();
+        let providers: Vec<&ProviderStatus> = all_visible
+            .iter()
+            .copied()
+            .take(MAX_PROVIDER_BLOCKS)
+            .collect();
         let mut blocks: Vec<ProviderMenuBlock> = providers
             .iter()
             .map(|p| provider_menu_block(p, now))

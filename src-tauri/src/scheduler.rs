@@ -185,7 +185,7 @@ fn usage_line(u: &UsageData) -> Option<String> {
 fn needs_api_key(provider_name: &str) -> bool {
     !matches!(
         provider_name,
-        "Codex" | "Claude Code" | "Kimi Code" | "Qoder"
+        "Codex" | "Claude Code" | "Kimi Code" | "Qoder" | "Bailian Coding" | "Bailian Token"
     )
 }
 
@@ -1230,7 +1230,14 @@ mod tests {
         // 后端豁免名单与前端 KEYLESS_PROVIDERS（Settings.tsx）双处维护、无跨端
         // 守护：后端漏加时免密供应商空 key 用户每轮静默「无数据」。本测试锁定
         // 后端名单——增删供应商必须显式改这里（前端侧无测试设施，见 issue #100）。
-        for name in ["Codex", "Claude Code", "Kimi Code", "Qoder"] {
+        for name in [
+            "Codex",
+            "Claude Code",
+            "Kimi Code",
+            "Qoder",
+            "Bailian Coding",
+            "Bailian Token",
+        ] {
             assert!(!needs_api_key(name), "{name} 应免 API Key");
         }
         for name in [

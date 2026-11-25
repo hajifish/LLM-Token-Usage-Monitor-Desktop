@@ -1,4 +1,7 @@
 pub mod anthropic;
+pub mod bailian_cli;
+pub mod bailian_coding;
+pub mod bailian_token;
 pub mod claude_code;
 pub mod codex;
 pub mod costs;
@@ -27,6 +30,8 @@ pub const ALL_PROVIDER_TYPES: &[&str] = &[
     "Kimi Code",
     "Zhipu",
     "Qoder",
+    "Bailian Coding",
+    "Bailian Token",
 ];
 
 /// 供应商类型统一显示名（UI 全系统展示口径；内部类型名是配置键/工厂键，不变）。
@@ -43,6 +48,8 @@ pub fn display_name(name: &str) -> &str {
         "Kimi API" | "Kimi" => "Kimi API",
         "Kimi Code" => "Kimi Code",
         "Zhipu" => "智谱",
+        "Bailian Coding" => "百炼 Coding Plan",
+        "Bailian Token" => "百炼 Token Plan",
         other => other,
     }
 }
@@ -88,6 +95,8 @@ pub fn create_provider(
         "Claude Code" => Some(Box::new(claude_code::ClaudeCodeProvider::new())),
         "Kimi Code" => Some(Box::new(kimi_code::KimiCodeProvider::new())),
         "Qoder" => Some(Box::new(qoder::QoderProvider::new(api_key))),
+        "Bailian Coding" => Some(Box::new(bailian_coding::BailianCodingProvider::new())),
+        "Bailian Token" => Some(Box::new(bailian_token::BailianTokenProvider::new())),
         _ => None,
     }
 }
@@ -236,6 +245,8 @@ mod tests {
             ("Kimi Code", "Kimi Code"),
             ("Zhipu", "智谱"),
             ("Qoder", "Qoder"),
+            ("Bailian Coding", "百炼 Coding Plan"),
+            ("Bailian Token", "百炼 Token Plan"),
         ];
         for (internal, display) in expected {
             assert_eq!(

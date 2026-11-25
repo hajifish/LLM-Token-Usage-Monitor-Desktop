@@ -15,12 +15,21 @@ export const PROVIDER_OPTIONS = [
   { value: 'Kimi Code', label: 'Kimi Code' },
   { value: 'Zhipu', label: '智谱' },
   { value: 'Qoder', label: 'Qoder' },
+  { value: 'Bailian Coding', label: '百炼 Coding Plan' },
+  { value: 'Bailian Token', label: '百炼 Token Plan' },
 ];
 
 /** 无需用户配置 API Key，凭证从本机 CLI / 桌面客户端自动读取的供应商类型。
  *  与 Rust needs_api_key 名单同口径；Qoder 虽属免密默认，但其 PAT 兜底入口
  *  在供应商页渲染分支特例放行（所有平台可填、可清空）。 */
-export const KEYLESS_PROVIDERS = new Set(['Codex', 'Claude Code', 'Kimi Code', 'Qoder']);
+export const KEYLESS_PROVIDERS = new Set([
+  'Codex',
+  'Claude Code',
+  'Kimi Code',
+  'Qoder',
+  'Bailian Coding',
+  'Bailian Token',
+]);
 
 /**
  * 是否 macOS。Qoder 的本地凭据读取（客户端 auth.v1.dat + 钥匙串解密）仅 macOS 支持，

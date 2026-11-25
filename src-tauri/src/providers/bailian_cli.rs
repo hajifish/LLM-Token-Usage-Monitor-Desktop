@@ -10,21 +10,38 @@ use serde_json::Value;
 /// GUI/launchd 精简 PATH 不含 homebrew（同 secrets.rs ioreg 先例）：绝对路径优先，回退 PATH。
 const BL_CANDIDATES: [&str; 3] = ["/opt/homebrew/bin/bl", "/usr/local/bin/bl", "bl"];
 
+/// bl 的 shebang 是 `#!/usr/bin/env node`：只给 bl 绝对路径不够，GUI 精简 PATH 里
+/// 连 node 也没有（v0.10.0 安装版实测 `env: node: No such file or directory`）。
+/// 子进程 PATH 前置常见 node 安装目录，保留原 PATH 兜底自定义安装。
+fn augmented_path(current: &str) -> String {
+    format!("/opt/homebrew/bin:/usr/local/bin:{}", current)
+}
+
+/// 绝对路径候选启动 bl，子进程 PATH 用 augmented_path 补齐 node 目录。
+fn spawn_bl(subcommand: &str, current_path: &str) -> std::io::Result<std::process::Output> {
+    let args = ["usage", subcommand, "--output", "json", "--quiet"];
+    let path = augmented_path(current_path);
+    let mut not_found = None;
+    for candidate in BL_CANDIDATES {
+        match std::process::Command::new(candidate)
+            .args(args)
+            .env("PATH", &path)
+            .output()
+        {
+            Ok(o) => return Ok(o),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => not_found = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(not_found.expect("BL_CANDIDATES 非空"))
+}
+
 /// shell 调 `bl usage <subcommand> --output json --quiet` 并解析 stdout。
 pub(super) async fn usage_json(subcommand: &str) -> Result<Value, ProviderError> {
     let sub = subcommand.to_string();
     // bl 是 node CLI，启动约 1s；放 blocking 池避免阻塞 async runtime。
     let output = tokio::task::spawn_blocking(move || {
-        let args = ["usage", sub.as_str(), "--output", "json", "--quiet"];
-        let mut not_found = None;
-        for path in BL_CANDIDATES {
-            match std::process::Command::new(path).args(args).output() {
-                Ok(o) => return Ok(o),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => not_found = Some(e),
-                Err(e) => return Err(e),
-            }
-        }
-        Err(not_found.expect("BL_CANDIDATES 非空"))
+        spawn_bl(&sub, &std::env::var("PATH").unwrap_or_default())
     })
     .await
     .map_err(|e| ProviderError(format!("百炼查询任务失败: {}", e)))?
@@ -60,6 +77,11 @@ pub(super) async fn usage_json(subcommand: &str) -> Result<Value, ProviderError>
 /// 失败文案映射：登录缺失给引导；其余提取人话（网络超时等 stderr 含 console 域名不算未登录）。
 fn map_bl_failure(subcommand: &str, stderr: &str) -> ProviderError {
     let low = stderr.to_lowercase();
+    if low.contains("env: node") || low.contains("node: no such file") {
+        return ProviderError(
+            "bl 依赖 node 运行时但未找到：请安装 node（如 brew install node），或把 node 所在目录加入 PATH 后重启应用".to_string(),
+        );
+    }
     if low.contains("auth login --console")
         || low.contains("console access token")
         || low.contains("consoleneedlogin")
@@ -113,6 +135,20 @@ mod tests {
     const NOT_LOGGED: &str = "(node:60558) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n(Use `node --trace-warnings ...` to show where the warning was created)\n{\"error\":{\"code\":3,\"message\":\"No console access token found.\",\"hint\":\"Run `bl auth login --console`.\"}}";
 
     #[test]
+    fn augmented_path_prepends_node_dirs_and_keeps_original() {
+        let p = augmented_path("/usr/bin:/bin");
+        assert!(p.starts_with("/opt/homebrew/bin:/usr/local/bin:"));
+        assert!(p.ends_with("/usr/bin:/bin"));
+    }
+
+    #[test]
+    fn missing_node_maps_to_runtime_guidance() {
+        let err = map_bl_failure("token-plan", "env: node: No such file or directory");
+        assert!(err.0.contains("node 运行时"), "got: {}", err.0);
+        assert!(!err.0.contains("bl usage"), "got: {}", err.0);
+    }
+
+    #[test]
     fn not_logged_stderr_maps_to_login_guidance() {
         let err = map_bl_failure("token-plan", NOT_LOGGED);
         assert_eq!(err.0, "百炼控制台未登录，请先运行 bl auth login --console");
@@ -161,5 +197,20 @@ mod tests {
     #[test]
     fn empty_stderr_falls_back() {
         assert!(map_bl_failure("token-plan", "").0.contains("未知错误"));
+    }
+
+    /// GUI 精简 PATH 现网探针（手动：cargo test --lib live_bl_gui_path -- --ignored --nocapture）。
+    /// 复现 v0.10.0 安装版环境：PATH 无 homebrew/node，验证子进程 PATH 补齐后 bl 可用。
+    #[test]
+    #[ignore]
+    fn live_bl_gui_path() {
+        let out = spawn_bl("token-plan", "/usr/bin:/bin:/usr/sbin:/sbin").expect("bl 应可启动");
+        assert!(
+            out.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("Percentage"), "stdout: {}", stdout);
     }
 }

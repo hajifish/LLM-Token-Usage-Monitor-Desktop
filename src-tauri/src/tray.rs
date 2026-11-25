@@ -128,6 +128,8 @@ fn tray_short_code(name: &str) -> Option<&'static str> {
         "Anthropic" => Some("A"),
         "Claude Code" => Some("CC"),
         "Qoder" => Some("QD"),
+        "Bailian Coding" => Some("BC"),
+        "Bailian Token" => Some("BT"),
         _ => None,
     }
 }

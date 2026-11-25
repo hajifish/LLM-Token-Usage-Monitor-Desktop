@@ -58,7 +58,7 @@ X-DashScope-API-Key: <sk-sp-key>      ← 三个 header 同发（各宿主接受
     "codingPlanInstanceInfos": [{
       "codingPlanQuotaInfo": {
         "per5HourUsedQuota": 123, "per5HourTotalQuota": 6000,
-        "per5HourQuotaNextRefreshTime": 1780000000,   // unix 秒
+        "per5HourQuotaNextRefreshTime": 1780000000000,   // unix 毫秒
         "perWeekUsedQuota": ..., "perWeekTotalQuota": ..., "perWeekQuotaNextRefreshTime": ...,
         "perBillMonthUsedQuota": ..., "perBillMonthTotalQuota": ..., "perBillMonthQuotaNextRefreshTime": ...
       }
@@ -84,7 +84,7 @@ X-DashScope-API-Key: <sk-sp-key>      ← 三个 header 同发（各宿主接受
   - `ConsoleNeedLogin` → 专用信号，触发国际重试。
   - `codingPlanInstanceInfos` 为空 → 「未订阅 Coding Plan」。
   - `codingPlanQuotaInfo` 缺失 → 解析错误。
-  - 单窗口：`used`/`total` 有限且 `total > 0` 才有效，否则跳过；`resetRaw > 1e9` 视为 unix 秒转 RFC3339 填 `reset_at`。
+  - 单窗口：`used`/`total` 有限且 `total > 0` 才有效，否则跳过；`resetRaw > 1e12` 视为 unix 毫秒转 RFC3339 填 `reset_at`。
   - 三窗口全缺 → schema 漂移错误。
 - `fetch_balance`：5h 剩余 % 优先，回退周 → 月，`currency: "%"`。
 - `fetch_quota_infos`：最多 3 张配额卡（「5小时」「每周」「账单月」），`plan_label: "coding plan"`，`reset_at` 为 RFC3339、`reset_time` 走 `format_iso_reset` 文本回退。
@@ -114,7 +114,7 @@ parser 单测优先：
 - `ConsoleNeedLogin` → 触发国际重试信号。
 - `InvalidApiKey`/`Unauthorized` → 认证失败；其它 code → 服务端错误附 code。
 - 空 `codingPlanInstanceInfos` → 未订阅。
-- unix 秒时间戳 → RFC3339 转换。
+- unix 毫秒时间戳 → RFC3339 转换。
 - 既有同步守卫测试（display_name / tray_short_code / needs_api_key）自动逼出所有映射点。
 
 ## 待定项
@@ -159,7 +159,9 @@ provider 不再收 api_key，改为 shell 调 `bl usage coding-plan --output jso
 ### v2 测试
 
 - 以登录后 `bl usage coding-plan --output json` 真实输出为 fixture 写解析单测。
-- bl 缺失 / 未登录 / 非零退出 / 空输出 的错误路径单测（mock 子进程输出）。
+- 错误映射纯函数 `bailian_cli::map_bl_failure/human_line` 单测 6 个：隔离 HOME 探针实测的未登录 stderr fixture、
+  网络超时含 console 域名不误判未登录、error JSON message+hint 提取、node 警告剥离、超长截断、空 stderr 兜底。
+  bl 缺失 / 未登录的端到端路径靠现网探针（`#[ignore]`）与人工验收，CI 不 shell 外部 CLI。
 - 同步守卫测试（needs_api_key 免密名单 / display_name / tray_short_code）随名单更新。
 ## v3 增量（2026-11-25）：百炼 Token Plan（用户确认「加 Token Plan，保留 Coding」）
 
@@ -170,7 +172,7 @@ provider 不再收 api_key，改为 shell 调 `bl usage coding-plan --output jso
   故 v2 的「未找到有效的 Coding Plan 订阅」提示是如实汇报，不是缺陷。
 - Token Plan 归一化输出（bailian-cli-commands 的 FT/IT，正则 `^per(\d+)(Hour|Day|Week|Month)(Percentage|ResetTime)$`）：
   `{ "per1MonthPercentage": 0.00079…, "per1MonthResetTime": 1798214400000, "hasQuotaData": true }`。
-  **percentage 为已用占比（0-1）**；**ResetTime 为 unix 毫秒**（coding-plan 为秒，两者不同）；
+  **percentage 为已用占比（0-1）**；**ResetTime 为 unix 毫秒**（coding-plan 同毫秒：bl 两表共用 `new Date(ms)` 渲染器）；
   无订阅时 `{ "hasQuotaData": false }`；窗口按跨度升序（Hour=1/Day=24/Week=168/Month=720 小时权重）。
 - bl 不暴露 Token Plan 绝对额度，只给占比 → 配额走**百分比型**口径（同 Codex）：used=已用%、total=100、current_value=None。
 
@@ -194,3 +196,13 @@ provider 不再收 api_key，改为 shell 调 `bl usage coding-plan --output jso
   2026-11-25 实测「订阅月: 剩余 99.75% reset=2026-12-25T16:00:00+00:00」（= 北京 12-26 00:00），与 bl 表格输出一致。
 - 门禁：cargo fmt/clippy -D warnings/test 241 过；prettier/eslint/tsc/vite build 全绿。
 - 界面验收：供应商页添加「百炼 Token Plan」（免密、无需 Key）后，面板应显示订阅月剩余%与重置倒计时。
+
+### 独立评审修正（2026-11-25，PR #133 合并前）
+
+- **blocker**：GUI/launchd 精简 PATH 不含 homebrew，裸 `Command::new("bl")` 在 Finder 启动的 release 版必 NotFound。
+  改绝对路径候选 `/opt/homebrew/bin/bl` → `/usr/local/bin/bl` → PATH 回退（同 secrets.rs ioreg 先例）。
+- **should-fix**：coding-plan resetTime 实为毫秒（bl 两表共用 `new Date(ms)` 渲染器 Zw），v2 误按秒；改 `>1e12` 毫秒换算，fixture 同步。
+- **should-fix**：错误映射抽纯函数 map_bl_failure/human_line 并补 6 单测；登录判定改精确标记
+  （auth login --console / console access token / ConsoleNeedLogin / 请登录 / 未登录），网络超时含 console 域名不再误判；
+  stderr 取首条人话（error JSON message+hint 优先、剥 node 警告、截断 200 字符）再入 UI。
+- **nit**：per2Month 命名「2个月」避二月歧义；scheduler 免密注释补 Bailian 两名。

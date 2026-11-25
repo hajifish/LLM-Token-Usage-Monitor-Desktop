@@ -124,6 +124,8 @@ fn window_key(base: &str) -> Option<(f64, String)> {
         "订阅月".to_string()
     } else if count == 1.0 {
         format!("每{}", unit_cn)
+    } else if unit_cn == "月" {
+        format!("{}个月", count)
     } else {
         format!("{}{}", count, unit_cn)
     };
@@ -231,6 +233,13 @@ mod tests {
             windows.iter().map(|w| w.name.as_str()).collect::<Vec<_>>(),
             ["5小时", "每周", "订阅月"]
         );
+    }
+
+    #[test]
+    fn multi_month_name_not_february() {
+        let body = json!({ "per2MonthPercentage": 0.1, "hasQuotaData": true });
+        let windows = parse_bl_output(&body).unwrap();
+        assert_eq!(windows[0].name, "2个月");
     }
 
     #[test]

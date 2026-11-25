@@ -108,7 +108,7 @@ impl LlmProvider for BailianCodingProvider {
 // bl `usage coding-plan --output json` 的归一化输出（见 bailian-cli-commands 的 WT/UT）：
 //   { "per5Hour": {usedQuota,totalQuota,resetTime,percentage}, "perWeek": {...},
 //     "perBillMonth": {...}, "instanceType": "..." }
-// 无 VALID 订阅时输出 {}；某窗口缺席时为 {}。resetTime 为 unix 秒。
+// 无 VALID 订阅时输出 {}；某窗口缺席时为 {}。resetTime 为 unix 毫秒（bl 渲染器 new Date(ms)，同 token-plan）。
 
 fn parse_bl_output(json: &Value) -> Result<Vec<BailianWindow>, ProviderError> {
     let mut windows = Vec::new();
@@ -135,8 +135,8 @@ fn parse_bl_output(json: &Value) -> Result<Vec<BailianWindow>, ProviderError> {
         let reset_at = w
             .get("resetTime")
             .and_then(|v| v.as_f64())
-            .filter(|r| r.is_finite() && *r > 1e9)
-            .and_then(|r| chrono::DateTime::from_timestamp(r as i64, 0))
+            .filter(|r| r.is_finite() && *r > 1e12)
+            .and_then(|r| chrono::DateTime::from_timestamp((r / 1000.0) as i64, 0))
             .map(|dt| dt.to_rfc3339());
         windows.push(BailianWindow {
             name: name.to_string(),
@@ -166,9 +166,9 @@ mod tests {
     #[test]
     fn parses_full_three_windows() {
         let body = json!({
-            "per5Hour": window(123.0, 6000.0, 1780000000),
-            "perWeek": window(1000.0, 45000.0, 1780500000),
-            "perBillMonth": window(9000.0, 90000.0, 1781000000),
+            "per5Hour": window(123.0, 6000.0, 1780000000000),
+            "perWeek": window(1000.0, 45000.0, 1780500000000),
+            "perBillMonth": window(9000.0, 90000.0, 1781000000000),
             "instanceType": "pro"
         });
         let windows = parse_bl_output(&body).unwrap();
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn empty_window_skipped() {
         let body = json!({
-            "per5Hour": window(10.0, 6000.0, 1780000000),
+            "per5Hour": window(10.0, 6000.0, 1780000000000),
             "perWeek": {},
             "perBillMonth": {}
         });
@@ -207,8 +207,8 @@ mod tests {
     #[test]
     fn partial_windows_render_available_only() {
         let body = json!({
-            "per5Hour": window(10.0, 6000.0, 1780000000),
-            "perBillMonth": window(9000.0, 90000.0, 1781000000)
+            "per5Hour": window(10.0, 6000.0, 1780000000000),
+            "perBillMonth": window(9000.0, 90000.0, 1781000000000)
         });
         let windows = parse_bl_output(&body).unwrap();
         assert_eq!(windows.len(), 2);
@@ -219,7 +219,7 @@ mod tests {
     fn zero_total_window_skipped() {
         let body = json!({
             "per5Hour": window(0.0, 0.0, 0),
-            "perWeek": window(1000.0, 45000.0, 1780500000)
+            "perWeek": window(1000.0, 45000.0, 1780500000000)
         });
         let windows = parse_bl_output(&body).unwrap();
         assert_eq!(windows.len(), 1);

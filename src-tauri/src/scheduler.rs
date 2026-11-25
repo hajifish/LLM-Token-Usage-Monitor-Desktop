@@ -563,7 +563,7 @@ async fn poll_providers(
             .filter(|a| !a.trim().is_empty())
             .unwrap_or_else(|| providers::display_name(&provider_cfg.name).to_string());
 
-        // Codex / Claude Code / Kimi Code / Qoder 无需 API Key（凭证从 CLI/客户端配置读取），跳过空 key 检查
+        // Codex / Claude Code / Kimi Code / Qoder / Bailian Coding / Bailian Token 无需 API Key（凭证从 CLI/客户端配置读取），跳过空 key 检查
         if !provider_cfg.enabled
             || (needs_api_key(&provider_cfg.name) && provider_cfg.api_key.is_empty())
         {

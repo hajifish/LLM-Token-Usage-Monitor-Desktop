@@ -185,7 +185,7 @@ fn usage_line(u: &UsageData) -> Option<String> {
 fn needs_api_key(provider_name: &str) -> bool {
     !matches!(
         provider_name,
-        "Codex" | "Claude Code" | "Kimi Code" | "Qoder"
+        "Codex" | "Claude Code" | "Kimi Code" | "Qoder" | "Bailian Coding" | "Bailian Token"
     )
 }
 
@@ -563,7 +563,7 @@ async fn poll_providers(
             .filter(|a| !a.trim().is_empty())
             .unwrap_or_else(|| providers::display_name(&provider_cfg.name).to_string());
 
-        // Codex / Claude Code / Kimi Code / Qoder 无需 API Key（凭证从 CLI/客户端配置读取），跳过空 key 检查
+        // Codex / Claude Code / Kimi Code / Qoder / Bailian Coding / Bailian Token 无需 API Key（凭证从 CLI/客户端配置读取），跳过空 key 检查
         if !provider_cfg.enabled
             || (needs_api_key(&provider_cfg.name) && provider_cfg.api_key.is_empty())
         {
@@ -1230,7 +1230,14 @@ mod tests {
         // 后端豁免名单与前端 KEYLESS_PROVIDERS（Settings.tsx）双处维护、无跨端
         // 守护：后端漏加时免密供应商空 key 用户每轮静默「无数据」。本测试锁定
         // 后端名单——增删供应商必须显式改这里（前端侧无测试设施，见 issue #100）。
-        for name in ["Codex", "Claude Code", "Kimi Code", "Qoder"] {
+        for name in [
+            "Codex",
+            "Claude Code",
+            "Kimi Code",
+            "Qoder",
+            "Bailian Coding",
+            "Bailian Token",
+        ] {
             assert!(!needs_api_key(name), "{name} 应免 API Key");
         }
         for name in [

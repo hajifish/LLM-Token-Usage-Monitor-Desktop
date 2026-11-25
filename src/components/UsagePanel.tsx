@@ -17,6 +17,8 @@ const BRAND_LOGOS: Record<string, string> = {
   'Claude Code': '/providers/anthropic.png',
   'Kimi Code': '/providers/kimi.png',
   Qoder: '/providers/qoder.png',
+  'Bailian Coding': '/providers/bailiancoding.png',
+  'Bailian Token': '/providers/bailiantoken.png',
 };
 
 function BrandLogo({ name }: { name: string }) {

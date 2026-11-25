@@ -342,7 +342,9 @@ function Providers({ onBack }: ProvidersProps) {
                       ? '自动从 ~/.codex/auth.json 读取凭证'
                       : p.name === 'Claude Code'
                         ? '自动从 ~/.claude/credentials.json 读取凭证'
-                        : '自动从 ~/.kimi-code/config.toml 读取凭证'}
+                        : p.name === 'Bailian Coding' || p.name === 'Bailian Token'
+                          ? '自动读取本机 bl CLI 控制台登录态（先运行 bl auth login --console）'
+                          : '自动从 ~/.kimi-code/config.toml 读取凭证'}
                   </span>
                 ) : (
                   <input
